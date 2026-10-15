@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@gpeng/naudiodon@2.4.1': 0511fa45092dda327049dc169da0913f80e6d5963a6ad01dc5101b8a06dd6769
+
 importers:
 
   .:
@@ -31,7 +34,7 @@ importers:
     dependencies:
       '@gpeng/naudiodon':
         specifier: ^2.4.1
-        version: 2.4.1
+        version: 2.4.1(patch_hash=0511fa45092dda327049dc169da0913f80e6d5963a6ad01dc5101b8a06dd6769)
       '@hono/node-server':
         specifier: ^1.19.17
         version: 1.19.17(hono@4.13.13)
@@ -3483,7 +3486,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@gpeng/naudiodon@2.4.1':
+  '@gpeng/naudiodon@2.4.1(patch_hash=0511fa45092dda327049dc169da0913f80e6d5963a6ad01dc5101b8a06dd6769)':
     dependencies:
       bindings: 1.5.0
 

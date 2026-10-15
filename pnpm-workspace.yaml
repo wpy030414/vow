@@ -7,3 +7,5 @@ allowBuilds:
   koffi: false
   naudiodon: true
   segfault-handler: true
+patchedDependencies:
+  '@gpeng/naudiodon@2.4.1': patches/@gpeng__naudiodon@2.4.1.patch

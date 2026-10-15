@@ -1,0 +1,13 @@
+diff --git a/package.json b/package.json
+index 8853dc4063c4e0397a6821e3c8f8a1427abb0be2..2197abecb74ee72cbab0a6785cc80db252ce835e 100644
+--- a/package.json
++++ b/package.json
+@@ -21,7 +21,7 @@
+   "author": "Streampunk Media Ltd",
+   "license": "Apache-2.0",
+   "scripts": {
+-    "install": "node-gyp rebuild"
++    "install": "node-gyp rebuild --dist-url=https://npmmirror.com/mirrors/node"
+   },
+   "gypfile": true
+ }
