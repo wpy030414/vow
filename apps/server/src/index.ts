@@ -11,7 +11,10 @@ import { audioRoutes } from './routes/audio'
 import { sseRoutes } from './routes/sse'
 import { sseHub } from './services/sse-hub'
 import { virtualAudio } from './services/virtual-audio'
-import { dictation } from './services/dictation'
+import { createDictation, resolveEngineConfig } from './services/dictation'
+import { loadNativeKeys } from './services/win32-keys'
+import { createAsrDictation, resolveAsrConfig, type AsrDictation } from './services/iflytek-asr'
+import { typeText } from './services/typing'
 import { ensureCert } from './services/tls-cert'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -53,11 +56,31 @@ if (existsSync(clientDir)) {
 sseHub.start()
 virtualAudio.start()
 
+// ─── 听写联动接线 ───
+// iflytek-api：hold 按下开 ASR 会话（消费 onAudioChunk 的 PCM）→ 松手收尾打字；
+// win-dictation：Win+H 快捷键注入（toggle 引擎）
+
+const engineCfg = resolveEngineConfig()
+const asrConfig = resolveAsrConfig()
+const asrCtl: AsrDictation | null =
+  engineCfg.engine === 'iflytek-api' && asrConfig
+    ? createAsrDictation(asrConfig, {
+        onFinalText: async (text) => {
+          await typeText(text)
+        },
+      })
+    : null
+if (engineCfg.engine === 'iflytek-api' && !asrConfig) {
+  console.warn('[ASR] 缺少 VOW_IFLYTEK_API_KEY / VOW_IFLYTEK_API_SECRET，回落 win-dictation')
+}
+const dictation = createDictation(loadNativeKeys(), engineCfg)
+
 const _origCreate = sseHub.createSession.bind(sseHub)
 sseHub.createSession = function (deviceName?: string, mode?: import('@vow/shared/types').RecordMode) {
   const session = _origCreate(deviceName, mode)
   session.onAudioChunk = ({ data, sampleRate }) => {
     virtualAudio.writeInputPCM({ data, sampleRate })
+    asrCtl?.feed(data, sampleRate) // ASR 未激活时内部 no-op
   }
   return session
 }
@@ -66,18 +89,23 @@ virtualAudio.setOutputCallback((pcm: Buffer) => {
   sseHub.broadcastOutputAudio(pcm)
 })
 
-// 听写联动：hold 按下（前端开「转文字」）→ 注入快捷键唤起听写引擎（讯飞 F6 / Win+H）；
-// 松开或会话销毁（页面关闭/断线/TTL 回收）→ 结束。引擎配置见 services/dictation.ts 与 .env
+// 听写联动：hold 按下（前端开「转文字」）→ 开听写；松开或会话销毁（页面关闭/断线/TTL 回收）→ 收尾
 sseHub.onDictationChange = (active, sessionId, reason) => {
-  void dictation.setDesired(active, `${reason}:${sessionId}`)
+  if (asrCtl) {
+    if (active) asrCtl.start()
+    else void asrCtl.stop()
+  } else {
+    void dictation.setDesired(active, `${reason}:${sessionId}`)
+  }
 }
 
-console.log(`Server starting on https://localhost:${PORT}`)
+console.log(`Server starting on https://localhost:${PORT}（听写引擎：${asrCtl ? 'iflytek-api' : 'win-dictation'}）`)
 const { key, cert } = ensureCert()
 serve({ fetch: app.fetch, port: PORT, createServer: createHttpsServer, serverOptions: { key, cert } })
 
 const shutdown = () => {
   console.log('\nShutting down...')
+  asrCtl?.cancel()
   dictation.releaseNow('shutdown')
   virtualAudio.stop()
   sseHub.stop()

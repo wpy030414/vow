@@ -63,11 +63,11 @@
 
 **MVP 阶段**：优先实现 Linux PulseAudio 方案（开发环境），Windows 通过 WASAPI 或第三方虚拟音频驱动实现。
 
-### A11：语音转文字双引擎路线——Win+H 现役 + 讯飞私有 API 直连演进
+### A11：语音转文字双引擎——iflytek-api 私有协议直连（默认）+ Win+H 保底
 
-**决策**：联动信号链（hold 翻转 → 唤起/结束）保持引擎无关；引擎仅两条路线：`win-dictation`（koffi → user32 keybd_event 注入 Win+H，toggle 语义）与 `iflytek-api`（服务端直连讯飞私有 ASR 协议：PCM → 文本 → SendInput 打字，演进中，落地前回落 win-dictation）。
+**决策**：hold + 「转文字」触发听写。默认 `iflytek-api`：服务端直连讯飞私有 ASR（签名握手 + raw PCM16@16k WS 推流），终稿经 SendInput（KEYEVENTF_UNICODE）打入焦点窗口；凭据缺失回落 `win-dictation`（koffi → keybd_event 注入 Win+H，toggle 语义）。
 **理由**：
 - Claude Code 原生 voice 模式为纯云端转写 + claude.ai OAuth 三重 gate（本机代理环境不可用），排除
-- 讯飞输入法快捷键注入路线已实测放弃：F6 注入未唤起语音面板，且重度依赖输入法客户端（须安装/运行/焦点/快捷键配置）被判定不可接受
-- 用户明确接受逆向私有 API 的维护成本（"碎了再说"），Win+H 保留为保底
-**代价**：Win+H 依赖 Windows 在线语音识别与默认麦克风选择；私有 API 存在签名/加密且可能随时变更的风险。
+- 讯飞输入法快捷键注入路线实测失败（F6 未唤起面板）且重度依赖输入法客户端（须安装/运行/焦点/快捷键配置），被判定不可接受，放弃
+- 私有协议经 frida 完整逆向并以真实会话回放验证（scripts/recon/FINDINGS.md，含签名 golden 向量）；实测端点接受 raw PCM 直发，免 opus 编码器；运行时零讯飞组件依赖
+**代价**：私有协议存在被服务端升级破坏的风险（用户已知悉并接受；Win+H 保底一行 env 可切回）；凭据为设备级，仅供本机个人使用。

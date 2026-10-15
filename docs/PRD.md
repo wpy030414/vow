@@ -64,7 +64,7 @@ vow 让任何带麦克风的浏览器设备（手机、平板）变身为宿主�
 |------|-----|
 | 前端开关 | 「转文字」复选（仅 Hold 模式可用，录音中锁定，localStorage 持久化） |
 | 触发 | 按住说话时，服务端注入听写引擎快捷键唤起语音转文字 |
-| 引擎 | 可配置（`VOW_DICTATION_ENGINE`）：`win-dictation`（Win+H 系统听写，现役）/ `iflytek-api`（讯飞私有 ASR 协议直连，演进中） |
-| 停止 | Win+H 为 toggle，松开再注入一次；会话断开/服务停止强制释放 |
-| 前置 | 听写引擎录音设备需选择 vow 虚拟麦克风（或设为系统默认输入） |
-| 演进 | `iflytek-api` 引擎——服务端直连讯飞 ASR 接口（PCM 直转文本 + SendInput 打字），摆脱对输入法客户端的运行时依赖 |
+| 引擎 | 可配置（`VOW_DICTATION_ENGINE`）：`iflytek-api`（讯飞私有 ASR 直连，默认；PCM→16k 重采样→WS 推流→SendInput 打字）/ `win-dictation`（Win+H 保底，凭据缺失时自动回落） |
+| 停止 | ASR 由服务端 VAD（eos 4s）+ status:2 收尾帧结束；Win+H 为 toggle 再注入一次；会话断开/服务停止强制释放 |
+| 前置 | iflytek-api：`.env` 配置凭据（获取过程见 scripts/recon/FINDINGS.md）；win-dictation：听写录音设备选择 vow 虚拟麦克风（或设为系统默认输入） |
+| 回显 | 无——转写结果不下发手机端；终稿打入宿主机焦点窗口（服务端控制台保留会话日志） |

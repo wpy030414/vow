@@ -30,7 +30,11 @@
 ```
 
 **后续帧**：仅 `{"data": {audio, encoding, format, status:1}}`；**尾帧** `status:2`（携末块音频）。
-共 96 帧 ≈ 11 秒语音（帧间隔 ~60-100ms）。
+共 96 帧 ≈ 7.7 秒语音（帧间隔 ~80ms）。
+
+> **音频容器结构（实证）**：`data.audio` 解码后为 `[2B BE 长度][opus 包]` 循环（残余 0），
+> 每包 40ms@16k（640 样本），每 JSON 块 ≈ 2 包 = 80ms。**且实测 `encoding:"raw"` 直发
+> PCM16LE@16k 被服务端接受（回放转写逐字一致）→ vow 引擎无需 opus 编码器。**
 
 ### 服务端 → 客户端（JSON 文本帧）
 
@@ -44,13 +48,14 @@
 - **签名验证**：`verify-secret.mjs` 用提取的 secret 精确复现真实会话签名（32 字节 base64 全等）
 - **回放验证**：`iflytek-probe.mjs` 自建 WebSocket 客户端（ws 包 + 手动子协议头），重放捕获的 96 帧真实音频 → 服务端返回转写「好的，我又说了一句话。」与实况逐字一致 ✅
 
-## 四、vow `iflytek-api` 引擎实现要点
+## 四、vow `iflytek-api` 引擎实现要点（已落地，见 apps/server/src/services/iflytek-asr.ts）
 
 1. **凭证明文入 .env**（`VOW_IFLYTEK_API_KEY` / `VOW_IFLYTEK_API_SECRET`），零输入法依赖
-2. 服务端消费 vow PCM（44100 base64）→ 16k 重采样 → **Opus 宽频编码**（`opusscript` 纯 JS）→ 60ms 一拍 JSON 帧
-3. 待实验：`encoding:"raw"`（PCM16 直发）是否被接受——若可，免 Opus 依赖（用 opusscript 解码捕获音频做对照实验）
-4. 转写文本 → SendInput（`KEYEVENTF_UNICODE`）打入焦点窗口；同步经 SSE 回显到手机端
-5. `uid` 生成规则（`YYMMDDhhmmss`+随机）与 device_id 复用策略按捕获样式照搬
+2. 服务端消费 vow PCM（44100 base64）→ 16k 线性重采样 → 80ms 分帧 → raw JSON 帧推流（背压保护 512KB）
+3. ✅ 已实证：`encoding:"raw"` PCM16 直发被接受——免 Opus 依赖
+4. 转写文本：终稿经 SendInput（`KEYEVENTF_UNICODE`）打入焦点窗口（不回显手机端）
+5. `uid` 生成复刻实况样式（`YYMMDDhhmmss`+序列）；device_id 进程内随机生成
+6. 单测含签名 golden 向量（真实会话复现）、重采样/分帧/类型转换、会话状态机（假 ws）
 
 ## 五、合规备注
 

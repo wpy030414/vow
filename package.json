@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.4",
+    "opusscript": "^0.1.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "wait-on": "^9.1.0",
