@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils'
 import type { RecordMode } from '@vow/shared/types'
-import { Hand, ToggleLeft, Volume2, Type } from 'lucide-react'
+import { Hand, Pointer, Volume2, Type } from 'lucide-react'
 
 interface ControlBarProps {
   mode: RecordMode
@@ -20,11 +20,12 @@ interface ControlBarProps {
 
 const modes: { value: RecordMode; label: string; icon: typeof Hand }[] = [
   { value: 'hold', label: 'Hold', icon: Hand },
-  { value: 'tap', label: 'Tap', icon: ToggleLeft },
+  { value: 'tap', label: 'Tap', icon: Pointer },
 ]
 
 const pill = cn(
-  'inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium',
+  // h-9：统一高度——图标按钮无文本行高，若按 py 撑高会比文字按钮矮 4px
+  'inline-flex items-center justify-center gap-2 h-9 px-4 rounded-md text-sm font-medium',
   'transition-colors duration-150',
   'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 )

@@ -33,6 +33,11 @@ interface UseMicrophoneReturn {
   stopRecording: () => void
 }
 
+/** 电平提交间隔（ms）与 EMA 系数：AudioWorklet 每 ~23ms 出一块，逐块 setState 会让
+ *  麦克风光环的 CSS 过渡反复重定目标（高频抽搐）；EMA + ~20Hz 节流后平滑跟手 */
+const LEVEL_EMIT_MS = 50
+const LEVEL_EMA_ALPHA = 0.3
+
 export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicrophoneReturn {
   const [recording, setRecording] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0)
@@ -47,6 +52,9 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
   const sequenceRef = useRef(0)
   const callbackRef = useRef(onAudioData)
   callbackRef.current = onAudioData
+  /** 电平 EMA 平滑值（原始 RMS 0-1）与上次提交时间——见 LEVEL_* 注释 */
+  const levelRef = useRef(0)
+  const lastLevelEmitRef = useRef(0)
 
   const stopRecording = useCallback(() => {
     // 作废在途 start（getUserMedia 可能在首次权限弹窗中长时间等待）
@@ -71,6 +79,8 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       void audioContextRef.current.close()
       audioContextRef.current = null
     }
+    levelRef.current = 0
+    lastLevelEmitRef.current = 0
     setRecording(false)
     setAudioLevel(0)
   }, [])
@@ -144,13 +154,18 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
         const seq = sequenceRef.current++
         callbackRef.current(base64, actualSampleRate, seq)
 
-        // 计算音量电平
+        // 音量电平：EMA 平滑 + 时间节流（43Hz 原始更新会令光环动画高频抽搐）
         let sum = 0
         for (let i = 0; i < inputData.length; i++) {
           sum += Math.abs(inputData[i])
         }
         const rms = Math.sqrt(sum / inputData.length)
-        setAudioLevel(Math.min(rms * 5, 1)) // 放大便于 UI 显示
+        levelRef.current = levelRef.current * (1 - LEVEL_EMA_ALPHA) + rms * LEVEL_EMA_ALPHA
+        const now = performance.now()
+        if (now - lastLevelEmitRef.current >= LEVEL_EMIT_MS) {
+          lastLevelEmitRef.current = now
+          setAudioLevel(Math.min(levelRef.current * 5, 1)) // 放大便于 UI 显示
+        }
       }
 
       // worklet 侧异常（处理器抛出/退出）→ 收敛为错误态，不再无声失败

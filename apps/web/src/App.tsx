@@ -12,15 +12,25 @@ import { WifiOff } from 'lucide-react'
 import { cn } from './lib/utils'
 import type { RecordMode, AudioDeviceStatus } from '@vow/shared/types'
 
-/** 「转文字」开关的本地持久化 key */
+/** 三开关的本地持久化 key（录制模式 / 播放设备 / 转文字） */
+const MODE_STORAGE_KEY = 'vow.record-mode'
+const OUTPUT_STORAGE_KEY = 'vow.output-enabled'
 const DICTATION_STORAGE_KEY = 'vow.dictation-enabled'
 
+/** 读取持久化值（隐私模式等场景静默返回 null） */
+function loadStored(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+
+/** 写入持久化值（失败静默） */
+function store(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* 隐私模式等场景 */ }
+}
+
 export function App() {
-  const [mode, setMode] = useState<RecordMode>('tap')
-  const [isOutputEnabled, setOutputEnabled] = useState(false)
-  const [dictationEnabled, setDictationEnabled] = useState<boolean>(
-    () => localStorage.getItem(DICTATION_STORAGE_KEY) === '1',
-  )
+  const [mode, setMode] = useState<RecordMode>(() => (loadStored(MODE_STORAGE_KEY) === 'hold' ? 'hold' : 'tap'))
+  const [isOutputEnabled, setOutputEnabled] = useState<boolean>(() => loadStored(OUTPUT_STORAGE_KEY) === '1')
+  const [dictationEnabled, setDictationEnabled] = useState<boolean>(() => loadStored(DICTATION_STORAGE_KEY) === '1')
   const [deviceStatus, setDeviceStatus] = useState<AudioDeviceStatus | null>(null)
   /** ?t= 配对尝试的错误提示（展示于配对引导屏） */
   const [pairError, setPairError] = useState<string | null>(null)
@@ -76,6 +86,27 @@ export function App() {
     })()
   }, [connect])
 
+  // 三开关持久化：统一 effect 写入（收口全部变更路径，含失败回退）
+  useEffect(() => { store(MODE_STORAGE_KEY, mode) }, [mode])
+  useEffect(() => { store(OUTPUT_STORAGE_KEY, isOutputEnabled ? '1' : '0') }, [isOutputEnabled])
+  useEffect(() => { store(DICTATION_STORAGE_KEY, dictationEnabled ? '1' : '0') }, [dictationEnabled])
+
+  // 「播放设备」持久化恢复：新会话在服务端默认关闭——建立后补同步一次。
+  // 不在此处 unlock 播放（无手势）：未解锁时音频到达会被丢弃，首次触摸由既有
+  // pointerdown 解锁逻辑接管，随后自动恢复播放
+  const syncedOutputRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!connected || !sessionId) return
+    if (syncedOutputRef.current === sessionId) return
+    syncedOutputRef.current = sessionId
+    if (!isOutputEnabled) return
+    fetch(`/api/audio/output?sessionId=${sessionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    }).catch(() => {})
+  }, [connected, sessionId, isOutputEnabled])
+
   // 任意首次触摸/点击都解锁输出播放（移动端自动播放策略；
   // 覆盖"自动连接后直接按麦克风"等所有路径）
   useEffect(() => {
@@ -125,12 +156,9 @@ export function App() {
     } catch { setOutputEnabled(!on) }
   }, [sessionId, unlockOutputAudio])
 
-  // 「转文字」开关——本地持久化；生效条件在上方 effect 中计算（hold + 录音中）
+  // 「转文字」开关——生效条件在上方 effect 中计算（hold + 录音中）；持久化由统一 effect 承担
   const handleToggleDictation = useCallback((on: boolean) => {
     setDictationEnabled(on)
-    try {
-      localStorage.setItem(DICTATION_STORAGE_KEY, on ? '1' : '0')
-    } catch { /* 隐私模式等场景 */ }
   }, [])
 
   // 未配对：整个界面让位给配对引导屏

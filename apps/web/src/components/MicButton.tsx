@@ -49,16 +49,16 @@ export function MicButton({ mode, recording, audioLevel, disabled, onStart, onSt
     e.currentTarget.blur()
   }, [])
 
-  // 音量光环
-  const glowScale = 1 + audioLevel * 0.35
-  const glowOpacity = 0.25 + audioLevel * 0.5
+  // 音量光环——基础尺寸超出按钮一圈（-inset-3）、振幅区间放大且低电平亦有软光，更醒目
+  const glowScale = 1 + audioLevel * 0.5
+  const glowOpacity = 0.2 + audioLevel * 0.4
 
   return (
     <div className="relative flex items-center justify-center select-none">
       {/* 音量扩散光环 */}
       {recording && (
         <div
-          className="absolute inset-0 rounded-full bg-red-400 transition-transform duration-150"
+          className="absolute -inset-3 rounded-full bg-red-400 pointer-events-none transition duration-150"
           style={{
             transform: `scale(${glowScale})`,
             opacity: glowOpacity,
