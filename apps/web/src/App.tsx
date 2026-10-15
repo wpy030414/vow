@@ -36,7 +36,7 @@ export function App() {
   const [pairError, setPairError] = useState<string | null>(null)
 
   // Web Audio 输出播放器
-  const { play: playOutputAudio, unlock: unlockOutputAudio } = useAudioOutput()
+  const { play: playOutputAudio, unlock: unlockOutputAudio, setKeepAlive } = useAudioOutput()
 
   // output_audio 回调
   const onOutputAudio = useCallback((base64Data: string, sampleRate: number) => {
@@ -126,6 +126,12 @@ export function App() {
   )
 
   const { recording, audioLevel, error: micError, startRecording, stopRecording } = useMicrophone({ onAudioData })
+
+  // 后台保活：录音中（Tap 持续态）或播放开启期间维持静默循环音源——
+  // 「正在播放音频」标记令浏览器豁免后台冻结，配合「采集中」豁免实现后台续传
+  useEffect(() => {
+    setKeepAlive(recording || isOutputEnabled)
+  }, [recording, isOutputEnabled, setKeepAlive])
 
   // 录音状态变化 → 同步服务端（听写联动：仅 hold 模式 + 「转文字」开启 + 录音中激活）
   useEffect(() => {

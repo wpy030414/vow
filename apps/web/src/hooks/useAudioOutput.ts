@@ -1,6 +1,6 @@
 // useAudioOutput — Web Audio API 播放来自宿主的系统音频
 
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useEffect } from 'react'
 import { LOOPBACK_SAMPLE_RATE } from '@vow/shared/constants'
 
 /** 预滚缓冲（秒）：新 chunk 到达时至少推迟这么多再播，吸收网络抖动 */
@@ -26,6 +26,8 @@ interface AudioOutputReturn {
   /** 在用户手势（点击输出开关 / 连接按钮）中调用——解锁移动端 AudioContext。
    *  移动浏览器要求 AudioContext 在手势上下文内创建/resume，否则永远 suspended，听不到声音 */
   unlock: () => void
+  /** 后台保活开关：true 期间维持一个静默循环音源（见 applyKeepAlive 注释），页面豁免后台冻结 */
+  setKeepAlive: (on: boolean) => void
 }
 
 export function useAudioOutput(): AudioOutputReturn {
@@ -39,11 +41,64 @@ export function useAudioOutput(): AudioOutputReturn {
     return ctxRef.current
   }, [])
 
+  // ─── 后台保活 ───
+
+  /** 保活循环音源（1s 静音 loop）与期望态 */
+  const keepAliveRef = useRef<AudioBufferSourceNode | null>(null)
+  const keepAliveWantedRef = useRef(false)
+
+  const stopKeepAlive = useCallback(() => {
+    if (keepAliveRef.current) {
+      try { keepAliveRef.current.stop() } catch { /* noop */ }
+      keepAliveRef.current = null
+    }
+  }, [])
+
+  const applyKeepAlive = useCallback(() => {
+    if (!keepAliveWantedRef.current) {
+      stopKeepAlive()
+      return
+    }
+    const ctx = ctxRef.current
+    if (!ctx || keepAliveRef.current) return
+    // 静音循环音源：页面被标记「正在播放音频」，浏览器据此豁免后台标签冻结/
+    // 重度节流（与「采集中」豁免互补，后台录音与下行播放得以持续；热路径无定时器依赖）。
+    // context 挂起时 start() 合法——resume 后自动发声（静音），无需等待解锁
+    const buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate)
+    const src = ctx.createBufferSource()
+    src.buffer = buf
+    src.loop = true
+    src.connect(ctx.destination)
+    src.start()
+    keepAliveRef.current = src
+  }, [stopKeepAlive])
+
+  const setKeepAlive = useCallback((on: boolean) => {
+    keepAliveWantedRef.current = on
+    applyKeepAlive()
+  }, [applyKeepAlive])
+
+  // 回前台恢复：移动端后台挂起（suspended/interrupted）后不自动恢复，需显式 resume
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      const ctx = ctxRef.current
+      if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => { /* 待下一次手势 */ })
+      applyKeepAlive()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [applyKeepAlive])
+
+  // 卸载清理：停掉保活音源
+  useEffect(() => stopKeepAlive, [stopKeepAlive])
+
   const unlock = useCallback(() => {
     const ctx = ensureCtx()
     if (ctx.state === 'suspended') {
       void ctx.resume()
     }
+    applyKeepAlive() // 保活请求可能先于 context 就绪发出——解锁时补挂
     // 播放 1 帧静音：部分移动浏览器要求真实播放过一次才完成解锁
     try {
       const buf = ctx.createBuffer(1, 1, ctx.sampleRate)
@@ -52,12 +107,13 @@ export function useAudioOutput(): AudioOutputReturn {
       src.connect(ctx.destination)
       src.start()
     } catch { /* noop */ }
-  }, [ensureCtx])
+  }, [ensureCtx, applyKeepAlive])
 
   const play = useCallback((base64Data: string, sampleRate: number) => {
     const ctx = ensureCtx(sampleRate)
     if (ctx.state !== 'running') {
-      // 未解锁（无手势）——此时 resume 无效，丢弃并等待 unlock
+      // 未解锁（无手势）或后台挂起——尝试 resume（无手势可能无效），本块丢弃
+      void ctx.resume().catch(() => { /* 待下一次手势 */ })
       return
     }
 
@@ -88,5 +144,5 @@ export function useAudioOutput(): AudioOutputReturn {
     nextTimeRef.current += frames / sampleRate
   }, [ensureCtx])
 
-  return { play, unlock }
+  return { play, unlock, setKeepAlive }
 }

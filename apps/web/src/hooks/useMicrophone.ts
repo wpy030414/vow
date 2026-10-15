@@ -8,7 +8,7 @@
 // - 音频回调移至 worklet 线程——主线程渲染/长任务不再串进采集节奏
 // - 摆脱已废弃 API
 
-import { useRef, useCallback, useState } from 'react'
+import { useRef, useCallback, useState, useEffect } from 'react'
 import { DEFAULT_SAMPLE_RATE, CAPTURE_CHUNK_SAMPLES, AUDIO_CHANNELS } from '@vow/shared/constants'
 // ?url&no-inline：强制产出外链资产文件——小文件（<4KB）默认会被 Vite 内联为
 // data: URL，而 data URL 形式的 worklet 跨浏览器不可靠（addModule 的兼容性坑）
@@ -189,6 +189,17 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       stopRecording()
     }
   }, [stopRecording])
+
+  // 回前台恢复：移动端后台挂起采集 context（suspended/interrupted）后需显式 resume
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      const ctx = audioContextRef.current
+      if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => { /* noop */ })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
 
   return { recording, audioLevel, error, startRecording, stopRecording }
 }
