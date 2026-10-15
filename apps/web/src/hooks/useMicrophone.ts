@@ -1,7 +1,18 @@
-// useMicrophone — 浏览器麦克风采集 + PCM 编码
+// useMicrophone — 浏览器麦克风采集 + PCM 编码（AudioWorklet，1024 采样块 ≈ 23ms）
+//
+// 采集链路：getUserMedia → MediaStreamAudioSourceNode → AudioWorkletNode('mic-capture')
+//   → 每积满 1024 采样 post 一块（transfer 零拷贝）→ 主线程 PCM16 base64 → 上行 POST
+//
+// 相对 ScriptProcessor（4096 采样 ≈ 93ms 一块，A14）：
+// - 采集块量化延迟 93ms → 23ms（上行延迟主项，端到端延迟减半）
+// - 音频回调移至 worklet 线程——主线程渲染/长任务不再串进采集节奏
+// - 摆脱已废弃 API
 
 import { useRef, useCallback, useState } from 'react'
-import { DEFAULT_SAMPLE_RATE, AUDIO_BUFFER_SIZE, AUDIO_CHANNELS } from '@vow/shared/constants'
+import { DEFAULT_SAMPLE_RATE, CAPTURE_CHUNK_SAMPLES, AUDIO_CHANNELS } from '@vow/shared/constants'
+// ?url&no-inline：强制产出外链资产文件——小文件（<4KB）默认会被 Vite 内联为
+// data: URL，而 data URL 形式的 worklet 跨浏览器不可靠（addModule 的兼容性坑）
+import micCaptureWorkletUrl from '../worklets/mic-capture-worklet.js?url&no-inline'
 
 type AudioDataCallback = (data: string, sampleRate: number, sequence: number) => void
 
@@ -29,7 +40,7 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const processorRef = useRef<ScriptProcessorNode | null>(null)
+  const workletRef = useRef<AudioWorkletNode | null>(null)
   const startingRef = useRef(false)
   /** start 世代令牌：每次 start/stop 递增；用于丢弃在途（如等待权限弹窗）的过期 getUserMedia 结果 */
   const startEpochRef = useRef(0)
@@ -41,13 +52,14 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
     // 作废在途 start（getUserMedia 可能在首次权限弹窗中长时间等待）
     startEpochRef.current++
     startingRef.current = false
-    // 断开 processor
-    if (processorRef.current) {
+    // 停掉 worklet 节点
+    if (workletRef.current) {
       try {
-        processorRef.current.disconnect()
-        processorRef.current.onaudioprocess = null
+        workletRef.current.port.postMessage('stop')
+        workletRef.current.port.onmessage = null
+        workletRef.current.disconnect()
       } catch { /* noop */ }
-      processorRef.current = null
+      workletRef.current = null
     }
     // 停止音轨
     if (streamRef.current) {
@@ -68,7 +80,7 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
 
     // 重入护栏：正在启动 / 已有活跃链路时先清理，杜绝泄漏的第二套 AudioContext 持续采集
     if (startingRef.current) return
-    if (audioContextRef.current || streamRef.current || processorRef.current) {
+    if (audioContextRef.current || streamRef.current || workletRef.current) {
       stopRecording()
     }
     startingRef.current = true
@@ -98,21 +110,35 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
 
       const actualSampleRate = audioCtx.sampleRate
 
-      // 3. 连接：source → processor → destination（不输出到扬声器，可设 gain 0）
+      // 3. 加载 worklet 处理器（每个 AudioContext 各需一次；URL 经 Vite ?url 托管，dev/prod 同构）
+      await audioCtx.audioWorklet.addModule(micCaptureWorkletUrl)
+      // 加载期间被 stop → stopRecording 已清理（含本 ctx），静默退出
+      if (epoch !== startEpochRef.current) return
+
+      // 4. 连接：source → worklet → gain(0) → destination
+      //（worklet 不输出声音；接向 destination 是 WebAudio 拉取式图的保活要求）
       const source = audioCtx.createMediaStreamSource(stream)
-      const processor = audioCtx.createScriptProcessor(AUDIO_BUFFER_SIZE, AUDIO_CHANNELS, AUDIO_CHANNELS)
-      processorRef.current = processor
+      const node = new AudioWorkletNode(audioCtx, 'mic-capture', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [AUDIO_CHANNELS],
+        channelCount: AUDIO_CHANNELS,
+        channelCountMode: 'explicit',
+        channelInterpretation: 'speakers',
+        processorOptions: { chunkSize: CAPTURE_CHUNK_SAMPLES },
+      })
+      workletRef.current = node
 
       // 静音本地输出（避免啸叫）
       const gainNode = audioCtx.createGain()
       gainNode.gain.value = 0
-      source.connect(processor)
-      processor.connect(gainNode)
+      source.connect(node)
+      node.connect(gainNode)
       gainNode.connect(audioCtx.destination)
 
-      // 4. 处理音频帧
-      processor.onaudioprocess = (evt) => {
-        const inputData = evt.inputBuffer.getChannelData(0)
+      // 5. 处理音频块：worklet 每积满 1024 采样出一块（transfer 零拷贝）
+      node.port.onmessage = (evt: MessageEvent<Float32Array>) => {
+        const inputData = evt.data
         const pcm16 = float32ToPCM16(inputData)
         const base64 = arrayBufferToBase64(pcm16.buffer as ArrayBuffer)
         const seq = sequenceRef.current++
@@ -125,6 +151,13 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
         }
         const rms = Math.sqrt(sum / inputData.length)
         setAudioLevel(Math.min(rms * 5, 1)) // 放大便于 UI 显示
+      }
+
+      // worklet 侧异常（处理器抛出/退出）→ 收敛为错误态，不再无声失败
+      node.onprocessorerror = () => {
+        if (epoch !== startEpochRef.current) return
+        setError('音频处理器异常——请重试')
+        stopRecording()
       }
 
       setRecording(true)

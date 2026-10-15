@@ -34,8 +34,8 @@ export const LOOPBACK_SAMPLE_RATE = 48000
 /** 系统音频环回声道数 */
 export const LOOPBACK_CHANNELS = 2
 
-/** ScriptProcessor 缓冲区大小（4096 / 44100 ≈ 93ms） */
-export const AUDIO_BUFFER_SIZE = 4096
+/** 采集块大小（采样数）——AudioWorklet 按 128 帧渲染量子累积，满此数即出一块（1024 / 44100 ≈ 23ms） */
+export const CAPTURE_CHUNK_SAMPLES = 1024
 
 /** 声道数 */
 export const AUDIO_CHANNELS = 1

@@ -26,8 +26,8 @@
 ### 上行链路（手机 → 宿主 → 系统应用）
 
 ```
-手机麦克风 → getUserMedia() → AudioContext → ScriptProcessor/AudioWorklet
-  → PCM 采样 → base64 编码 → SSE POST → Hono Server
+手机麦克风 → getUserMedia() → AudioContext → AudioWorklet（128 帧量子累积，1024 采样出块）
+  → PCM16 采样 → base64 编码 → POST /api/sse/audio → Hono Server
   → 解码 PCM → 写入虚拟音频输入设备缓冲区 → 系统应用读取
 ```
 
@@ -88,7 +88,8 @@
 | `components/ControlBar.tsx` | 融合控制栏（Hold/Tap + Listen + 「转文字」开关） |
 | `components/VolumeIndicator.tsx` | 实时音量指示 |
 | `hooks/useSSE.ts` | SSE 连接管理 hook（含保活 ping） |
-| `hooks/useMicrophone.ts` | 麦克风采集 hook（getUserMedia + AudioContext） |
+| `hooks/useMicrophone.ts` | 麦克风采集 hook（getUserMedia + AudioWorklet，1024 采样块） |
+| `worklets/mic-capture-worklet.js` | AudioWorklet 采集处理器（128 帧量子累积 → 1024 采样 transfer 出块；纯 JS，?url 外链） |
 | `hooks/useAudioOutput.ts` | 下行系统音频播放（Web Audio） |
 
 ### packages/portaudio/（@vow/portaudio）

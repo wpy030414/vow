@@ -90,3 +90,12 @@
 - LAN IP 白名单无效（威胁者天然在网段内）；原生 EventSource 无法自定义 header → cookie 是唯一「客户端网络层零改动」的凭据载体；fetch 手写 SSE 则须重新实现自动重连与心跳联动，不划算
 - 秘密的本质是物理接近：二维码只在宿主终端显示；tsx watch 频繁重启要求令牌必须持久化（per-run 令牌会逼人每次热重载重扫）
 **代价**：cookie 按 origin（scheme+IP+port）存取——宿主 IP 变更（建议 DHCP 保留）或 dev/prod 端口切换需重新扫码；`?t=` 配对的瞬间令牌出现在地址栏（前端随即 `replaceState` 抹除）；ASR 凭据内嵌与自签证书「继续访问」点击为既有决策，不受本项影响。
+
+### A14：麦克风采集迁移 AudioWorklet——1024 采样块（上行量化延迟 93ms → 23ms）
+
+**决策**：手机端采集由 `ScriptProcessorNode`（4096 采样块 ≈ 93ms，回调在主线程，已废弃）迁移为 `AudioWorkletNode('mic-capture')`——worklet 按 128 帧渲染量子累积，每满 1024 采样（≈23ms）经 transfer 零拷贝出一块；主线程仅剩 PCM16 编码与上行 POST。采集块常量 `AUDIO_BUFFER_SIZE` → `CAPTURE_CHUNK_SAMPLES = 1024`。worklet 源码以纯 JS 独立文件维护（`apps/web/src/worklets/mic-capture-worklet.js`），经 `?url&no-inline` 由 Vite 托管为外链资产。
+**理由**：
+- 4096 采样量化 ≈ 93ms 是上行可控链路延迟主项（≈136ms → ≈66ms，近半）；服务端环形缓冲与 23ms 节拍本以 1024 为粒度，两侧对齐后稳态缓冲占用同步降低
+- ScriptProcessor 已废弃：音频回调在主线程，渲染长任务/GC 直接串进采集节奏；worklet 独立线程免疫
+- 纯 JS + 强制外链是有意为之：AudioWorkletGlobalScope 无模块加载器（不能用 import/TS 产物），小文件默认被 Vite 内联为 data: URL，而 data:-worklet 在 Firefox/Safari 上有 addModule 兼容坑，`?no-inline` 强制出外链文件
+**代价**：上行 POST 频率 10.8/s → ~43/s（LAN 可忽略；如需再降可做 2~4 块合批或二进制通道）；AudioWorklet 要求 iOS 14.1+ / Chrome 66+（2020+ 设备，实际无影响）；每轮 start 多一次 addModule（浏览器按 URL 缓存，代价一个 Promise）；worklet 文件脱离 TS/测试基建，正确性依赖评审 + 真机验证。
