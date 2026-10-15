@@ -1,6 +1,7 @@
 // SSE 路由：stream / session / audio / state / info
 
 import { Hono } from 'hono'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { sseHub } from '../services/sse-hub'
 import type {
   ConnectRequest, ConnectResponse,
@@ -31,11 +32,26 @@ sseRoutes.get('/stream', async (c) => {
   if (!sessionId) {
     return c.json({ error: 'Missing sessionId query parameter' }, 400)
   }
-  if (!sseHub.getSession(sessionId)) {
-    return c.json({ error: 'Session not found; create one via POST /api/sse/session first' }, 404)
-  }
+  // 注意：不做 404 预检查——客户端 EventSource 断线自动重连时携带原 sessionId，
+  // 会话可能已被断连检测销毁，getOrCreateStream 会将其复活（重建 writer）
 
   const { session, stream } = sseHub.getOrCreateStream(sessionId)
+
+  // 断连检测：@hono/node-server 不向 TransformStream 传播取消，
+  // writer.write() 在客户端离开后不会失败，心跳清理永远不触发 → 会话泄漏
+  // （开着输出的死会话每秒被灌入约 1MB 的音频事件，内存无限增长）。
+  // 改为监听底层 HTTP 响应的 close 事件，连接一断立即销毁会话。
+  const nodeEnv = c.env as Partial<{ incoming: IncomingMessage; outgoing: ServerResponse }>
+  const closeOnce = (() => {
+    let fired = false
+    return () => {
+      if (fired) return
+      fired = true
+      sseHub.destroySession(sessionId)
+    }
+  })()
+  nodeEnv.outgoing?.on('close', closeOnce)
+  nodeEnv.incoming?.on('close', closeOnce)
 
   // 注册输出音频回调：系统音频 → SSE push 给手机
   session.onOutputAudio = (audioData: ArrayBuffer) => {

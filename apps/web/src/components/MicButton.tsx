@@ -95,12 +95,17 @@ export function MicButton({ mode, recording, audioLevel, disabled, onStart, onSt
       {/* 模式提示 */}
       {mode === 'hold' && !recording && (
         <span className="absolute -bottom-9 text-xs text-muted-foreground whitespace-nowrap">
-          按住说话
+          Hold to Talk
         </span>
       )}
       {mode === 'hold' && recording && (
         <span className="absolute -bottom-9 text-xs text-muted-foreground whitespace-nowrap">
-          松开发送
+          Release to Send
+        </span>
+      )}
+      {mode === 'tap' && !recording && (
+        <span className="absolute -bottom-9 text-xs text-muted-foreground whitespace-nowrap">
+          Tap to Talk
         </span>
       )}
     </div>

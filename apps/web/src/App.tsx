@@ -1,14 +1,13 @@
 // App.tsx — vow 主界面：连接 → 录音 → 实时音量 + 虚拟音频
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSSE } from './hooks/useSSE'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useAudioOutput } from './hooks/useAudioOutput'
 import { MicButton } from './components/MicButton'
-import { ModeSelector } from './components/ModeSelector'
+import { ControlBar } from './components/ControlBar'
 import { VolumeIndicator } from './components/VolumeIndicator'
-import { ConnectionStatus } from './components/ConnectionStatus'
-import { OutputToggle } from './components/OutputToggle'
+import { WifiOff } from 'lucide-react'
 import { cn } from './lib/utils'
 import type { RecordMode, AudioDeviceStatus } from '@vow/shared/types'
 
@@ -25,8 +24,8 @@ export function App() {
     playOutputAudio(base64Data, sampleRate)
   }, [playOutputAudio])
 
-  // SSE 会话
-  const { sessionId, connected, connecting, connect, disconnect, uploadAudio, updateState } = useSSE({
+  // SSE 会话（自动连接，无手动断开入口）
+  const { sessionId, connected, connecting, connect, uploadAudio, updateState } = useSSE({
     deviceName: 'vow-client',
     mode,
     onOutputAudio,
@@ -40,6 +39,23 @@ export function App() {
       .then((d: { status: AudioDeviceStatus }) => setDeviceStatus(d.status))
       .catch(() => {})
   }, [connected])
+
+  // 打开页面即自动连接——SSE 会话本身无需用户手势；
+  // 手势只用于解锁音频（麦克风权限弹窗、输出 AudioContext）
+  const didAutoConnectRef = useRef(false)
+  useEffect(() => {
+    if (didAutoConnectRef.current) return
+    didAutoConnectRef.current = true
+    void connect()
+  }, [connect])
+
+  // 任意首次触摸/点击都解锁输出播放（移动端自动播放策略；
+  // 覆盖"自动连接后直接按麦克风"等所有路径）
+  useEffect(() => {
+    const h = () => unlockOutputAudio()
+    document.addEventListener('pointerdown', h, { once: true })
+    return () => document.removeEventListener('pointerdown', h)
+  }, [unlockOutputAudio])
 
   // 麦克风
   const onAudioData = useCallback(
@@ -89,35 +105,43 @@ export function App() {
           <p className="text-sm text-muted-foreground mt-1">Voice over Web</p>
         </div>
 
+        {/* 自动连接中 / 失败——极简轻量状态，不再是独立初始页 */}
         {!connected && (
-          <button
-            type="button"
-            disabled={connecting}
-            onClick={() => {
-              unlockOutputAudio() // 借用这次手势提前解锁输出播放
-              void connect()
-            }}
-            className={cn(
-              'w-full py-3 rounded-lg text-sm font-medium transition-colors',
-              'bg-primary text-primary-foreground hover:bg-primary/90',
-              connecting && 'opacity-60 animate-pulse',
+          <div className="flex flex-col items-center gap-4 py-16">
+            {connecting ? (
+              <div className="text-sm text-muted-foreground animate-pulse">连接宿主机中…</div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <WifiOff className="w-4 h-4" />
+                  <span>未连接</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    unlockOutputAudio()
+                    void connect()
+                  }}
+                  className={cn(
+                    'px-6 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                    'bg-primary text-primary-foreground hover:bg-primary/90',
+                  )}
+                >
+                  重试连接
+                </button>
+              </>
             )}
-          >
-            {connecting ? '连接中…' : '连接宿主机'}
-          </button>
+          </div>
         )}
 
         {connected && (
           <>
-            <ModeSelector mode={mode} onChange={handleModeChange} disabled={recording} />
-
-            <ConnectionStatus
-              connected={connected}
-              connecting={connecting}
-              sessionId={sessionId}
-              recording={recording}
+            <ControlBar
               mode={mode}
-              isOutputEnabled={isOutputEnabled}
+              onModeChange={handleModeChange}
+              modeDisabled={recording}
+              outputEnabled={isOutputEnabled}
+              onOutputChange={handleToggleOutput}
             />
 
             <div className="pt-4">
@@ -131,13 +155,9 @@ export function App() {
               />
             </div>
 
-            <VolumeIndicator level={audioLevel} recording={recording} />
-
-            <OutputToggle
-              enabled={isOutputEnabled}
-              onChange={handleToggleOutput}
-              disabled={!connected}
-            />
+            <div className="pt-6">
+              <VolumeIndicator level={audioLevel} recording={recording} />
+            </div>
 
             {/* VB-Cable 安装状态 */}
             {deviceStatus && (
@@ -168,13 +188,12 @@ export function App() {
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={disconnect}
-              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-4 transition-colors"
-            >
-              断开连接
-            </button>
+            {/* 原"断开连接"位置：完整会话 ID */}
+            {sessionId && (
+              <div className="text-xs text-muted-foreground font-mono text-center select-all break-all">
+                {sessionId}
+              </div>
+            )}
           </>
         )}
       </div>
