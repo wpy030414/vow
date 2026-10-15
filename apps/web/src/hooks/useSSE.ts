@@ -18,6 +18,8 @@ interface UseSSEReturn {
   sessionId: string | null
   connected: boolean
   connecting: boolean
+  /** 未配对 / 令牌已轮换（API 401）——供 App 切换到配对引导屏 */
+  unauthorized: boolean
   lastEvent: ServerEvent | null
   connect: () => Promise<void>
   disconnect: () => void
@@ -29,6 +31,7 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [unauthorized, setUnauthorized] = useState(false)
   const [lastEvent, setLastEvent] = useState<ServerEvent | null>(null)
 
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -58,6 +61,12 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+      if (sessResp.status === 401) {
+        // 未配对 / 令牌已轮换——交给 App 的配对引导屏
+        setUnauthorized(true)
+        setConnecting(false)
+        return
+      }
       if (!sessResp.ok) {
         throw new Error(`Session creation failed: ${sessResp.status}`)
       }
@@ -76,6 +85,7 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
           if (event.type === 'connected') {
             setConnected(true)
             setConnecting(false)
+            setUnauthorized(false)
           }
           if (event.type === 'error') {
             setConnected(false)
@@ -133,6 +143,11 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
     const ping = async () => {
       try {
         const r = await fetch(`/api/sse/ping?sessionId=${sessionId}`, { method: 'POST' })
+        if (r.status === 401) {
+          // 令牌在会话存续期间被轮换——进入配对引导屏
+          setUnauthorized(true)
+          return
+        }
         if (r.status === 404) {
           cleanupStream()
           void connect()
@@ -150,5 +165,5 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
     }
   }, [sessionId, connect, cleanupStream])
 
-  return { sessionId, connected, connecting, lastEvent, connect, disconnect, uploadAudio, updateState }
+  return { sessionId, connected, connecting, unauthorized, lastEvent, connect, disconnect, uploadAudio, updateState }
 }

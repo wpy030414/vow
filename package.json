@@ -10,6 +10,7 @@
     "test": "pnpm -r test",
     "get-driver": "tsx scripts/get-driver.ts",
     "portaudio-check": "tsx scripts/portaudio-check.ts",
+    "pair": "tsx scripts/pair.ts",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

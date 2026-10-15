@@ -1,5 +1,6 @@
 // SSE 连接池管理
 
+import { randomUUID } from 'node:crypto'
 import type { ServerEvent, DeviceState, RecordMode, StateUpdateRequest } from '@vow/shared/types'
 import { SSE_HEARTBEAT_MS, SSE_SESSION_TTL_MS } from '@vow/shared/constants'
 
@@ -19,8 +20,6 @@ export interface SSESession {
 
 /** 事件总线的回调 */
 export type HubEventListener = (sessionId: string, event: ServerEvent) => void
-
-let sessionCounter = 0
 
 export class SSEHub {
   private sessions = new Map<string, SSESession>()
@@ -52,7 +51,8 @@ export class SSEHub {
   // ─── 会话管理 ───
 
   createSession(deviceName?: string, mode: RecordMode = 'tap'): SSESession {
-    const id = `vow-${Date.now()}-${++sessionCounter}`
+    // 随机不可猜：会话 ID 在重连复活路径中兼作凭据（app 层另有配对鉴权，此处防跨会话互串）
+    const id = `vow-${randomUUID()}`
     const now = Date.now()
     const session: SSESession = {
       id,

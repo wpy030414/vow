@@ -18,6 +18,7 @@
 ## 关键约定
 
 - 所有 API 在 `/api/*` 路径下
+- 鉴权：除 `/api/pair`、`/api/health` 外全部需配对 cookie——`pnpm pair` 打印二维码 / `--rotate` 轮换，令牌持久于 `.vow/pairing-token`
 - SSE 端点：`/api/sse`
 - 虚拟音频：宿主端经 koffi FFI 直连自持 PortAudio DLL（@vow/portaudio，worker 线程），零安装期编译
 - 录制模式：`hold`（按住）和 `tap`（点击切换）

@@ -7,6 +7,7 @@ import { useAudioOutput } from './hooks/useAudioOutput'
 import { MicButton } from './components/MicButton'
 import { ControlBar } from './components/ControlBar'
 import { VolumeIndicator } from './components/VolumeIndicator'
+import { PairingScreen } from './components/PairingScreen'
 import { WifiOff } from 'lucide-react'
 import { cn } from './lib/utils'
 import type { RecordMode, AudioDeviceStatus } from '@vow/shared/types'
@@ -21,6 +22,8 @@ export function App() {
     () => localStorage.getItem(DICTATION_STORAGE_KEY) === '1',
   )
   const [deviceStatus, setDeviceStatus] = useState<AudioDeviceStatus | null>(null)
+  /** ?t= 配对尝试的错误提示（展示于配对引导屏） */
+  const [pairError, setPairError] = useState<string | null>(null)
 
   // Web Audio 输出播放器
   const { play: playOutputAudio, unlock: unlockOutputAudio } = useAudioOutput()
@@ -31,7 +34,7 @@ export function App() {
   }, [playOutputAudio])
 
   // SSE 会话（自动连接，无手动断开入口）
-  const { sessionId, connected, connecting, connect, uploadAudio, updateState } = useSSE({
+  const { sessionId, connected, connecting, unauthorized, connect, uploadAudio, updateState } = useSSE({
     deviceName: 'vow-client',
     mode,
     onOutputAudio,
@@ -48,11 +51,29 @@ export function App() {
 
   // 打开页面即自动连接——SSE 会话本身无需用户手势；
   // 手势只用于解锁音频（麦克风权限弹窗、输出 AudioContext）
+  // 若 URL 携带配对令牌（?t=，来自 pnpm pair 二维码）：先配对，再连接
   const didAutoConnectRef = useRef(false)
   useEffect(() => {
     if (didAutoConnectRef.current) return
     didAutoConnectRef.current = true
-    void connect()
+    void (async () => {
+      const t = new URLSearchParams(window.location.search).get('t')
+      if (t) {
+        try {
+          const resp = await fetch('/api/pair', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: t }),
+          })
+          if (!resp.ok) setPairError('配对令牌无效或已轮换——请在宿主机重新运行 pnpm pair 后扫码')
+        } catch {
+          setPairError('配对请求失败——请确认宿主机服务在运行')
+        }
+        // 无论成败都抹掉地址栏中的令牌（防截图/书签同步泄漏）
+        window.history.replaceState(null, '', window.location.pathname)
+      }
+      void connect()
+    })()
   }, [connect])
 
   // 任意首次触摸/点击都解锁输出播放（移动端自动播放策略；
@@ -111,6 +132,19 @@ export function App() {
       localStorage.setItem(DICTATION_STORAGE_KEY, on ? '1' : '0')
     } catch { /* 隐私模式等场景 */ }
   }, [])
+
+  // 未配对：整个界面让位给配对引导屏
+  if (unauthorized) {
+    return (
+      <PairingScreen
+        error={pairError}
+        onRetry={() => {
+          setPairError(null)
+          void connect()
+        }}
+      />
+    )
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background">

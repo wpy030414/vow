@@ -81,3 +81,12 @@
 - 与既有 `win32-keys.ts`（koffi → user32）同构，仓库统一 FFI 技术栈；FFI 声明经真实探针验证（枚举 40 设备 / 开流 / 阻塞写全 0 错误）
 - 阻塞式 `Pa_WriteStream` 放独立 worker（PaStream 有线程亲和性，不可用 koffi.async），主事件循环零阻塞；完整复刻 naudiodon 的「无流时新鲜枚举」（漂移重试的前提）、`defaultLowOutputLatency` 与 closeOnError 语义
 **代价**：自持 603KB 二进制（升级 PortAudio 须重跑 portaudio-check 并复核 `worker-source.ts` 结构体布局）；FFI 声明面改为自维护（协议测试 + 冒烟脚本 + 本记录三道防线）；worker 引入 eval 字符串层（协议类型集中于 `types.ts`，替身桥测试守护）。
+
+### A13：配对令牌鉴权——二维码换取 HttpOnly cookie（/api 全量收口）
+
+**决策**：所有 `/api/*`（`/api/pair`、`/api/health` 除外）需配对鉴权：宿主端首次生成 128-bit 随机令牌持久于 `.vow/pairing-token`（gitignored，重启/热重载不换码）；`pnpm pair`（或生产形态启动）在终端打印二维码（URL 携带 `?t=`），手机扫码后由 SPA 调 `POST /api/pair` 换取 `vow_token` cookie（HttpOnly + Secure + SameSite=Strict，180 天；浏览器对同源 fetch/EventSource 自动携带——客户端网络层零改动）；中间件另接受 `Authorization: Bearer`（CLI 冒烟通道）。令牌可反复出示（多设备同扫一码）；轮换 = `pnpm pair --rotate`（旧 cookie 立即全部失效）。同批收口：移除全开 `cors()`、`sessionId` 改 `crypto.randomUUID()`。
+**理由**：
+- 威胁模型是「同一 WiFi 内的任何人 + 手机随手打开的恶意网页」：此前无鉴权可建会话后直接窃听系统音频回环（loopback→SSE）、经 ASR+SendInput 向宿主焦点窗口注入文本、向虚拟麦克风灌音；`cors()` 的 `ACAO:*` 让任意网页可读写 API（浏览器 drive-by）
+- LAN IP 白名单无效（威胁者天然在网段内）；原生 EventSource 无法自定义 header → cookie 是唯一「客户端网络层零改动」的凭据载体；fetch 手写 SSE 则须重新实现自动重连与心跳联动，不划算
+- 秘密的本质是物理接近：二维码只在宿主终端显示；tsx watch 频繁重启要求令牌必须持久化（per-run 令牌会逼人每次热重载重扫）
+**代价**：cookie 按 origin（scheme+IP+port）存取——宿主 IP 变更（建议 DHCP 保留）或 dev/prod 端口切换需重新扫码；`?t=` 配对的瞬间令牌出现在地址栏（前端随即 `replaceState` 抹除）；ASR 凭据内嵌与自签证书「继续访问」点击为既有决策，不受本项影响。

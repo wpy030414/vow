@@ -12,6 +12,7 @@ vow 通过浏览器将手机等移动设备的麦克风音频实时传输到宿�
 - **SSE 实时传输**：音频数据通过 Server-Sent Events 实时推送到宿主机后端
 - **虚拟麦克风**：宿主机后端在系统中创建虚拟音频输入设备，供其他应用使用
 - **反向音频输出**（可选项）：手机可作为系统音频输出设备，收听宿主机的系统声音
+- **配对鉴权**：终端二维码配对（`pnpm pair`），全部 API 经 HttpOnly cookie 鉴权，防同一 WiFi 内未授权访问
 
 ## 快速开始
 
@@ -45,7 +46,23 @@ pnpm build
 pnpm start
 ```
 
-访问 http://localhost:48085 即可使用。
+访问 https://localhost:48085 即可使用。
+
+### 首次配对
+
+所有 API 需配对后才能访问（防止同一 WiFi 内的未授权设备窃听系统音频或向宿主注入内容）：
+
+```bash
+pnpm pair                  # 终端打印配对二维码（dev 模式用 pnpm pair --port 48086）
+pnpm pair --rotate         # 轮换令牌——所有已配对设备立即失效
+```
+
+手机扫描终端二维码即完成配对，**一次配对长期有效**（cookie 180 天）。令牌持久于 `.vow/pairing-token`（gitignored），服务重启不换码。
+
+## 安全
+
+- 全部 `/api/*`（除 `/api/pair`、`/api/health`）需配对凭据；凭据为 128-bit 随机令牌，仅出现于宿主机终端二维码与手机 HttpOnly cookie
+- 开启「转文字」时，麦克风音频会实时上传至讯飞私有 ASR（协议细节见 `scripts/recon/FINDINGS.md`）；其余音频仅在宿主机本地链路流转
 
 ## 项目结构
 

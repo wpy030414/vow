@@ -65,9 +65,12 @@
 
 | 模块 | 职责 |
 |------|------|
-| `index.ts` | 入口，挂载路由 + 静态文件 + 音频/听写联动接线 |
+| `index.ts` | 入口，挂载路由 + 鉴权中间件 + 静态文件 + 音频/听写联动接线 |
 | `routes/sse.ts` | SSE 端点管理（连接池、chunk 转发、状态上报） |
 | `routes/audio.ts` | 设备列表/状态、输出捕获开关 |
+| `routes/pair.ts` | 配对路由——POST /api/pair 以令牌换 HttpOnly cookie（注册于鉴权中间件之前） |
+| `services/auth.ts` | 配对令牌持久化（.vow/pairing-token）+ Auth 中间件（cookie/Bearer，常量时间比对） |
+| `services/pairing-qr.ts` | 终端配对二维码打印（qrcode-terminal 动态加载，缺失降级纯链接） |
 | `services/sse-hub.ts` | 会话池、心跳/TTL 回收、事件广播 |
 | `services/virtual-audio.ts` | 虚拟音频设备（输入写入 = @vow/portaudio(koffi→PortAudio, worker 线程)；环回输出捕获） |
 | `services/dictation.ts` | 语音转文字联动——Win+H 引擎（按键注入 + 翻转去重；env 显式启用） |

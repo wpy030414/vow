@@ -1,6 +1,5 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,6 +15,9 @@ import { loadNativeKeys } from './services/win32-keys'
 import { createAsrDictation, resolveAsrConfig, type AsrDictation } from './services/iflytek-asr'
 import { typeText } from './services/typing'
 import { ensureCert } from './services/tls-cert'
+import { createAuthMiddleware, loadOrCreateToken } from './services/auth'
+import { printPairingCode } from './services/pairing-qr'
+import { createPairRoutes } from './routes/pair'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -36,11 +38,18 @@ config({ path: join(repoRoot, '.env') })
 
 const PORT = parseInt(process.env.PORT || '48085', 10)
 
+/** .vow/：TLS 证书与配对令牌的存放地（gitignored） */
+const vowDir = join(repoRoot, '.vow')
+const pairingToken = loadOrCreateToken(vowDir)
+
 const app = new Hono()
 
-app.use('*', cors())
+app.get('/api/health', (c) => c.json({ status: 'ok' })) // 探活——无泄密面，保持免鉴权
 
-app.get('/api/health', (c) => c.json({ status: 'ok' }))
+// ⚠ 顺序即安全边界：/api/pair 必须在鉴权中间件【之前】注册（Hono 的 app.use 只作用于其后注册的路由）
+app.route('/api', createPairRoutes({ token: pairingToken }))
+app.use('/api/*', createAuthMiddleware(pairingToken))
+
 app.route('/api/sse', sseRoutes)
 app.route('/api/audio', audioRoutes)
 
@@ -109,8 +118,15 @@ sseHub.onDictationChange = (active, sessionId, reason) => {
 }
 
 console.log(`Server starting on https://localhost:${PORT}（听写引擎：${engineCfg.engine}）`)
-const { key, cert } = ensureCert()
+const { key, cert } = ensureCert(vowDir)
 serve({ fetch: app.fetch, port: PORT, createServer: createHttpsServer, serverOptions: { key, cert } })
+
+// 配对二维码：生产形态（内置前端）打印；dev 下前端在 Vite(48086)——用 `pnpm pair --port 48086`
+if (existsSync(clientDir)) {
+  printPairingCode(PORT, pairingToken)
+} else {
+  console.log('[Auth] dev 模式——配对二维码请运行: pnpm pair --port 48086')
+}
 
 const shutdown = async () => {
   console.log('\nShutting down...')
