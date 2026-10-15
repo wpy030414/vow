@@ -45,6 +45,12 @@ export const AUDIO_CHANNELS = 1
 /** SSE 心跳间隔（毫秒） */
 export const SSE_HEARTBEAT_MS = 15_000
 
+/** 客户端保活 ping 间隔（毫秒） */
+export const SSE_PING_MS = 15_000
+
+/** 会话空闲超时（毫秒）——超过即回收；90s 容忍后台标签页定时器节流（最长 60s 一次） */
+export const SSE_SESSION_TTL_MS = 90_000
+
 /** EventSource 重连等待（毫秒） */
 export const SSE_RECONNECT_MS = 3_000
 

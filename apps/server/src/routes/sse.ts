@@ -96,6 +96,16 @@ sseRoutes.post('/audio', async (c) => {
   return c.json(resp)
 })
 
+// ─── POST /api/sse/ping?sessionId=xxx — 客户端保活 ───
+
+sseRoutes.post('/ping', (c) => {
+  const sessionId = c.req.query('sessionId')
+  if (!sessionId) return c.json({ error: 'Missing sessionId query parameter' }, 400)
+  const ok = sseHub.touch(sessionId)
+  if (!ok) return c.json({ error: 'Session not found' }, 404)
+  return c.json({ ok: true })
+})
+
 // ─── POST /api/sse/state — 客户端状态更新 ───
 
 sseRoutes.post('/state', async (c) => {

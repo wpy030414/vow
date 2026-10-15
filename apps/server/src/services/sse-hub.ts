@@ -1,7 +1,7 @@
 // SSE 连接池管理
 
 import type { ServerEvent, DeviceState, RecordMode, StateUpdateRequest } from '@vow/shared/types'
-import { SSE_HEARTBEAT_MS } from '@vow/shared/constants'
+import { SSE_HEARTBEAT_MS, SSE_SESSION_TTL_MS } from '@vow/shared/constants'
 
 /** 单个客户端会话 */
 export interface SSESession {
@@ -25,17 +25,20 @@ let sessionCounter = 0
 export class SSEHub {
   private sessions = new Map<string, SSESession>()
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private reapTimer: ReturnType<typeof setInterval> | null = null
   private listeners = new Set<HubEventListener>()
 
   // ─── 生命周期 ───
 
   start() {
     this.heartbeatTimer = setInterval(() => this.sendHeartbeats(), SSE_HEARTBEAT_MS)
+    this.reapTimer = setInterval(() => this.reapStaleSessions(), 15_000)
     console.log('[SSE Hub] started')
   }
 
   stop() {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
+    if (this.reapTimer) clearInterval(this.reapTimer)
     for (const [id, session] of this.sessions) {
       void this.closeWriter(session.writer, id)
     }
@@ -80,6 +83,14 @@ export class SSEHub {
 
   getSession(id: string): SSESession | undefined {
     return this.sessions.get(id)
+  }
+
+  /** 显式刷新会话活跃时间（客户端保活 ping） */
+  touch(id: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    session.lastHeartbeat = Date.now()
+    return true
   }
 
   getConnectionInfo() {
@@ -187,6 +198,18 @@ export class SSEHub {
         void this.sendEvent(session.writer, event).catch(() => {
           this.destroySession(id)
         })
+      }
+    }
+  }
+
+  /** 回收空闲超时会话——断连检测在开发代理（vite http-proxy）后不可靠，以 TTL 兜底 */
+  private reapStaleSessions() {
+    const now = Date.now()
+    for (const [id, session] of this.sessions) {
+      const idleMs = now - session.lastHeartbeat
+      if (idleMs > SSE_SESSION_TTL_MS) {
+        console.log(`[SSE Hub] session reaped (idle ${Math.round(idleMs / 1000)}s): ${id}`)
+        this.destroySession(id)
       }
     }
   }

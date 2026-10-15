@@ -5,6 +5,7 @@ import type {
   ConnectRequest, ConnectResponse, AudioChunk, AudioUploadResponse,
   ServerEvent, StateUpdateRequest, RecordMode,
 } from '@vow/shared/types'
+import { SSE_PING_MS } from '@vow/shared/constants'
 
 interface UseSSEOptions {
   deviceName?: string
@@ -123,6 +124,31 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
   useEffect(() => {
     return () => { cleanupStream() }
   }, [cleanupStream])
+
+  // 保活 ping：每 15s 上报活跃，页面回到前台立即补一次。
+  // 服务端以 SSE_SESSION_TTL_MS 回收超时会话——代理后断连检测不可靠时的兜底。
+  // ping 404 = 会话已被服务端回收（TTL/重启），自动重建
+  useEffect(() => {
+    if (!sessionId) return
+    const ping = async () => {
+      try {
+        const r = await fetch(`/api/sse/ping?sessionId=${sessionId}`, { method: 'POST' })
+        if (r.status === 404) {
+          cleanupStream()
+          void connect()
+        }
+      } catch { /* 网络抖动，忽略 */ }
+    }
+    const timer = setInterval(ping, SSE_PING_MS)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void ping()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [sessionId, connect, cleanupStream])
 
   return { sessionId, connected, connecting, lastEvent, connect, disconnect, uploadAudio, updateState }
 }
