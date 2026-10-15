@@ -1,10 +1,17 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config } from 'dotenv'
 import { resolve } from 'node:path'
+import { createServer as createHttpsServer } from 'node:https'
+import { audioRoutes } from './routes/audio'
+import { sseRoutes } from './routes/sse'
+import { sseHub } from './services/sse-hub'
+import { virtualAudio } from './services/virtual-audio'
+import { ensureCert } from './services/tls-cert'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '..', '..')
@@ -14,10 +21,12 @@ const PORT = parseInt(process.env.PORT || '48085', 10)
 
 const app = new Hono()
 
-// API 路由
-app.get('/api/health', (c) => c.json({ status: 'ok' }))
+app.use('*', cors())
 
-// --- 生产模式：托管前端静态文件 ---
+app.get('/api/health', (c) => c.json({ status: 'ok' }))
+app.route('/api/sse', sseRoutes)
+app.route('/api/audio', audioRoutes)
+
 const clientDir = join(__dirname, 'client')
 if (existsSync(clientDir)) {
   app.get('/assets/*', async (c) => {
@@ -40,5 +49,31 @@ if (existsSync(clientDir)) {
   })
 }
 
-console.log(`Server starting on port ${PORT}...`)
-serve({ fetch: app.fetch, port: PORT })
+sseHub.start()
+virtualAudio.start()
+
+const _origCreate = sseHub.createSession.bind(sseHub)
+sseHub.createSession = function (deviceName?: string, mode?: import('@vow/shared/types').RecordMode) {
+  const session = _origCreate(deviceName, mode)
+  session.onAudioChunk = ({ data, sampleRate }) => {
+    virtualAudio.writeInputPCM({ data, sampleRate })
+  }
+  return session
+}
+
+virtualAudio.setOutputCallback((pcm: Buffer) => {
+  sseHub.broadcastOutputAudio(pcm)
+})
+
+console.log(`Server starting on https://localhost:${PORT}`)
+const { key, cert } = ensureCert()
+serve({ fetch: app.fetch, port: PORT, createServer: createHttpsServer, serverOptions: { key, cert } })
+
+const shutdown = () => {
+  console.log('\nShutting down...')
+  virtualAudio.stop()
+  sseHub.stop()
+  process.exit(0)
+}
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)

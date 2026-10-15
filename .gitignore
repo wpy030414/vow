@@ -21,3 +21,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# 驱动缓存（pnpm get-driver 下载）
+vendor/VBCABLE/
+
+# TLS 证书（pnpm dev 自动生成）
+.vow/

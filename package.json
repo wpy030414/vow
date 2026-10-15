@@ -8,10 +8,12 @@
     "build": "pnpm --filter @vow/server build && pnpm --filter @vow/web build",
     "start": "pnpm --filter @vow/server start",
     "test": "pnpm -r test",
+    "get-driver": "tsx scripts/get-driver.ts",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "concurrently": "^9.2.4",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "wait-on": "^9.1.0"
   }
