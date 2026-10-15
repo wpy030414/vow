@@ -31,11 +31,15 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
   const streamRef = useRef<MediaStream | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const startingRef = useRef(false)
+  /** start 世代令牌：每次 start/stop 递增；用于丢弃在途（如等待权限弹窗）的过期 getUserMedia 结果 */
+  const startEpochRef = useRef(0)
   const sequenceRef = useRef(0)
   const callbackRef = useRef(onAudioData)
   callbackRef.current = onAudioData
 
   const stopRecording = useCallback(() => {
+    // 作废在途 start（getUserMedia 可能在首次权限弹窗中长时间等待）
+    startEpochRef.current++
     startingRef.current = false
     // 断开 processor
     if (processorRef.current) {
@@ -68,6 +72,7 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       stopRecording()
     }
     startingRef.current = true
+    const epoch = ++startEpochRef.current
 
     try {
       // 1. 获取麦克风权限
@@ -80,6 +85,11 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
           sampleRate: DEFAULT_SAMPLE_RATE,
         },
       })
+      // 等待期间已被 stop（典型：首次权限弹窗，用户已松手）→ 掐掉此流，不建立采集链路
+      if (epoch !== startEpochRef.current) {
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
       streamRef.current = stream
 
       // 2. 创建 AudioContext（使用实际采样率）
@@ -120,6 +130,8 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       setRecording(true)
       startingRef.current = false
     } catch (err) {
+      // 已被 stop 作废的尝试：静默丢弃（权限结果留待下一次按压处理，不覆盖新状态的错误展示）
+      if (epoch !== startEpochRef.current) return
       const msg = err instanceof DOMException
         ? err.name === 'NotAllowedError'
           ? '麦克风权限被拒绝——主人能不能给咱开一下权限喵♪'
