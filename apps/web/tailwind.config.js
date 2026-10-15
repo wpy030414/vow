@@ -1,6 +1,11 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
+  // hover 变体仅在支持 hover 的设备生效——否则触屏点击后 :hover 粘滞
+  // （如 MicButton 的 hover:scale-105 会让按钮在点击后一直偏大，点别处才恢复）
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     container: {

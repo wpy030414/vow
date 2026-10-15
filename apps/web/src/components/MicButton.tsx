@@ -1,6 +1,7 @@
 // MicButton — 录制按钮（Hold/Tap 双模式）
 
 import { useRef, useCallback } from 'react'
+import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { Mic, MicOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { RecordMode } from '@vow/shared/types'
@@ -15,12 +16,15 @@ interface MicButtonProps {
 }
 
 export function MicButton({ mode, recording, audioLevel, disabled, onStart, onStop }: MicButtonProps) {
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isHold = mode === 'hold'
+  // 同步按压标记：不能依赖 recording 状态——startRecording 异步（getUserMedia），
+  // 快速点按时 pointerup 先于状态翻转到达，过期闭包会漏掉 stop 导致录音卡死
+  const pressingRef = useRef(false)
 
   const handlePointerDown = useCallback(() => {
     if (disabled) return
     if (isHold) {
+      pressingRef.current = true
       onStart()
     } else {
       // Tap 模式：翻转
@@ -32,17 +36,18 @@ export function MicButton({ mode, recording, audioLevel, disabled, onStart, onSt
     }
   }, [disabled, isHold, recording, onStart, onStop])
 
-  const handlePointerUp = useCallback(() => {
-    if (isHold && recording) {
+  const endPress = useCallback(() => {
+    if (isHold && pressingRef.current) {
+      pressingRef.current = false
       onStop()
     }
-  }, [isHold, recording, onStop])
+  }, [isHold, onStop])
 
-  const handlePointerLeave = useCallback(() => {
-    if (isHold && recording) {
-      onStop()
-    }
-  }, [isHold, recording, onStop])
+  // 移动端点击后焦点滞留（focus ring 常显）——blur 必须放在 click 里：
+  // click 在浏览器完成焦点赋值之后触发，pointerup 时 blur 会被随后的赋焦覆盖
+  const handleClick = useCallback((e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.blur()
+  }, [])
 
   // 音量光环
   const glowScale = 1 + audioLevel * 0.35
@@ -66,8 +71,10 @@ export function MicButton({ mode, recording, audioLevel, disabled, onStart, onSt
         type="button"
         disabled={disabled}
         onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerLeave}
+        onPointerUp={endPress}
+        onPointerLeave={endPress}
+        onPointerCancel={endPress}
+        onClick={handleClick}
         // 触屏防滚动（勿再绑 touch 事件——移动端 pointer+touch 会双触发，
         // 曾导致 startRecording 重入、泄漏的 AudioContext 持续采集）
         style={{ touchAction: 'none' }}
