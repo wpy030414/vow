@@ -24,8 +24,10 @@ vow 通过浏览器将手机等移动设备的麦克风音频实时传输到宿�
 
 ```bash
 pnpm install
-cp .env.example .env
 ```
+
+开箱即用：默认听写引擎 `iflytek-api` 的凭据已 base64 内置源码，无需任何环境配置。
+如需切换引擎（`win-dictation`）、自定义端口或覆盖凭据，可选：`cp .env.example .env` 并按注释修改。
 
 ### 开发
 

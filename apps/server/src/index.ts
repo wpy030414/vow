@@ -70,22 +70,18 @@ sseHub.start()
 virtualAudio.start()
 
 // ─── 听写联动接线 ───
-// iflytek-api：hold 按下开 ASR 会话（消费 onAudioChunk 的 PCM）→ 松手收尾打字；
-// win-dictation：Win+H 快捷键注入（toggle 引擎）
+// 默认 iflytek-api（凭据 base64 内置，零配置）：hold 按下开 ASR 会话（消费 onAudioChunk 的 PCM）
+// → 松手收尾打字；注入 VOW_DICTATION_ENGINE=win-dictation 才切换到 Win+H 快捷键注入（toggle 引擎）
 
 const engineCfg = resolveEngineConfig()
-const asrConfig = resolveAsrConfig()
 const asrCtl: AsrDictation | null =
-  engineCfg.engine === 'iflytek-api' && asrConfig
-    ? createAsrDictation(asrConfig, {
+  engineCfg.engine === 'iflytek-api'
+    ? createAsrDictation(resolveAsrConfig(), {
         onFinalText: async (text) => {
           await typeText(text)
         },
       })
     : null
-if (engineCfg.engine === 'iflytek-api' && !asrConfig) {
-  console.warn('[ASR] 缺少 VOW_IFLYTEK_API_KEY / VOW_IFLYTEK_API_SECRET，回落 win-dictation')
-}
 const dictation = createDictation(loadNativeKeys(), engineCfg)
 
 const _origCreate = sseHub.createSession.bind(sseHub)
@@ -112,7 +108,7 @@ sseHub.onDictationChange = (active, sessionId, reason) => {
   }
 }
 
-console.log(`Server starting on https://localhost:${PORT}（听写引擎：${asrCtl ? 'iflytek-api' : 'win-dictation'}）`)
+console.log(`Server starting on https://localhost:${PORT}（听写引擎：${engineCfg.engine}）`)
 const { key, cert } = ensureCert()
 serve({ fetch: app.fetch, port: PORT, createServer: createHttpsServer, serverOptions: { key, cert } })
 

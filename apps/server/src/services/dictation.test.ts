@@ -10,7 +10,21 @@ function fakeKeys() {
   return { keys, calls }
 }
 
-const WIN_CFG = resolveEngineConfig({} as NodeJS.ProcessEnv)
+const WIN_CFG = resolveEngineConfig({ VOW_DICTATION_ENGINE: 'win-dictation' } as NodeJS.ProcessEnv)
+
+describe('resolveEngineConfig — 默认与显式切换', () => {
+  it('默认 iflytek-api（开箱即用）', () => {
+    expect(resolveEngineConfig({} as NodeJS.ProcessEnv).engine).toBe('iflytek-api')
+  })
+
+  it('注入 VOW_DICTATION_ENGINE=win-dictation 才切换到 Win+H', () => {
+    expect(resolveEngineConfig({ VOW_DICTATION_ENGINE: 'win-dictation' } as NodeJS.ProcessEnv).engine).toBe('win-dictation')
+  })
+
+  it('未知值回落 iflytek-api', () => {
+    expect(resolveEngineConfig({ VOW_DICTATION_ENGINE: 'bogus' } as NodeJS.ProcessEnv).engine).toBe('iflytek-api')
+  })
+})
 
 describe('createDictation — toggle 引擎（Win+H）', () => {
   it('状态翻转才注入，重复同值去重', async () => {

@@ -7,6 +7,7 @@ import {
   float32ToPcm16Base64,
   base64ToFloat32,
   createAsrSession,
+  resolveAsrConfig,
   FRAME_SAMPLES,
   type AsrConfig,
 } from './iflytek-asr'
@@ -16,6 +17,28 @@ const CFG: AsrConfig = {
   apiSecret: 'sH8v2wSSxxHTy1UNfN6dFaSqVjlmR7BB',
   appId: '100IME',
 }
+
+describe('resolveAsrConfig — 内置凭据与 env 覆盖', () => {
+  it('默认（空 env）：解码内置 base64 凭据，即真实设备凭据', () => {
+    expect(resolveAsrConfig({} as NodeJS.ProcessEnv)).toEqual(CFG)
+  })
+
+  it('env 逐字段覆盖内置值', () => {
+    const cfg = resolveAsrConfig({
+      VOW_IFLYTEK_API_KEY: 'k-override',
+      VOW_IFLYTEK_API_SECRET: 's-override',
+      VOW_IFLYTEK_APP_ID: 'app-override',
+    } as NodeJS.ProcessEnv)
+    expect(cfg).toEqual({ apiKey: 'k-override', apiSecret: 's-override', appId: 'app-override' })
+  })
+
+  it('仅覆盖 appId 时 key/secret 仍用内置', () => {
+    const cfg = resolveAsrConfig({ VOW_IFLYTEK_APP_ID: 'other' } as NodeJS.ProcessEnv)
+    expect(cfg.appId).toBe('other')
+    expect(cfg.apiKey).toBe(CFG.apiKey)
+    expect(cfg.apiSecret).toBe(CFG.apiSecret)
+  })
+})
 
 describe('签名 URL', () => {
   it('复现真实会话签名（2026-10-15 15:28:44 实况 golden 向量）', () => {

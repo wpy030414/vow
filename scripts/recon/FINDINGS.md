@@ -50,7 +50,7 @@
 
 ## 四、vow `iflytek-api` 引擎实现要点（已落地，见 apps/server/src/services/iflytek-asr.ts）
 
-1. **凭证明文入 .env**（`VOW_IFLYTEK_API_KEY` / `VOW_IFLYTEK_API_SECRET`），零输入法依赖
+1. **凭据 base64 内置源码**（env `VOW_IFLYTEK_API_KEY` / `VOW_IFLYTEK_API_SECRET` 可逐字段覆盖），开箱即用、零输入法依赖
 2. 服务端消费 vow PCM（44100 base64）→ 16k 线性重采样 → 80ms 分帧 → raw JSON 帧推流（背压保护 512KB）
 3. ✅ 已实证：`encoding:"raw"` PCM16 直发被接受——免 Opus 依赖
 4. 转写文本：终稿经 SendInput（`KEYEVENTF_UNICODE`）打入焦点窗口（不回显手机端）

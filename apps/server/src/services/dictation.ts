@@ -1,9 +1,10 @@
 // dictation — 语音转文字联动：hold 按下时唤起宿主机听写引擎
 //
 // 引擎路线（DECISIONS A11）：
-//   win-dictation   Win+H 系统听写（toggle：松开时再注入一次关闭）——保底引擎
-//   iflytek-api     讯飞私有 ASR 直连（services/iflytek-asr.ts）——由 index.ts 直接路由，
-//                   本服务的构建器仅保留 win 实现
+//   iflytek-api     讯飞私有 ASR 直连（services/iflytek-asr.ts）——默认引擎（凭据内置，开箱即用），
+//                   由 index.ts 直接路由，本服务的构建器仅保留 win 实现
+//   win-dictation   Win+H 系统听写（toggle：松开时再注入一次关闭）——注入
+//                   VOW_DICTATION_ENGINE=win-dictation 才启用
 
 import { loadNativeKeys, VK_H, type NativeKeys } from './win32-keys'
 
@@ -25,7 +26,8 @@ export interface EngineConfig {
 }
 
 export function resolveEngineConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
-  return { engine: env.VOW_DICTATION_ENGINE === 'iflytek-api' ? 'iflytek-api' : 'win-dictation' }
+  // 默认 iflytek-api（开箱即用）；想用 Win+H 系统听写才需注入 env
+  return { engine: env.VOW_DICTATION_ENGINE === 'win-dictation' ? 'win-dictation' : 'iflytek-api' }
 }
 
 export function buildEngine(keys: NativeKeys): EngineRuntime {

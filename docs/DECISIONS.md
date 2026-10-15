@@ -65,7 +65,7 @@
 
 ### A11：语音转文字双引擎——iflytek-api 私有协议直连（默认）+ Win+H 保底
 
-**决策**：hold + 「转文字」触发听写。默认 `iflytek-api`：服务端直连讯飞私有 ASR（签名握手 + raw PCM16@16k WS 推流），终稿经 SendInput（KEYEVENTF_UNICODE）打入焦点窗口；凭据缺失回落 `win-dictation`（koffi → keybd_event 注入 Win+H，toggle 语义）。
+**决策**：hold + 「转文字」触发听写。默认 `iflytek-api`：服务端直连讯飞私有 ASR（签名握手 + raw PCM16@16k WS 推流），终稿经 SendInput（KEYEVENTF_UNICODE）打入焦点窗口；凭据（apiKey/apiSecret/appId）以 base64 集成于源码，开箱即用、env 可逐字段覆盖；注入 `VOW_DICTATION_ENGINE=win-dictation` 才切换到 `win-dictation`（koffi → keybd_event 注入 Win+H，toggle 语义）。
 **理由**：
 - Claude Code 原生 voice 模式为纯云端转写 + claude.ai OAuth 三重 gate（本机代理环境不可用），排除
 - 讯飞输入法快捷键注入路线实测失败（F6 未唤起面板）且重度依赖输入法客户端（须安装/运行/焦点/快捷键配置），被判定不可接受，放弃

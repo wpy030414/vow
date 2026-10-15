@@ -17,11 +17,25 @@ export interface AsrConfig {
   appId: string
 }
 
-export function resolveAsrConfig(env: NodeJS.ProcessEnv = process.env): AsrConfig | null {
-  const apiKey = env.VOW_IFLYTEK_API_KEY
-  const apiSecret = env.VOW_IFLYTEK_API_SECRET
-  if (!apiKey || !apiSecret) return null
-  return { apiKey, apiSecret, appId: env.VOW_IFLYTEK_APP_ID || '100IME' }
+// 内置凭据——base64(JSON) 直接集成于源码：开箱即用，默认引擎 iflytek-api 零配置可用。
+// 来源：对本机已安装讯飞客户端的互操作分析（scripts/recon/FINDINGS.md）；
+// 设备级凭据，仅供本机个人使用。env 逐字段覆盖（VOW_IFLYTEK_API_KEY / _API_SECRET / _APP_ID）。
+const BUILTIN_CREDENTIALS_B64 =
+  'eyJhcGlLZXkiOiIxNTQ2MTQwMjgyNmM4MzYwZWJjZjEyNzBjYmJhODhlNSIsImFwaVNlY3JldCI6InNIOHYyd1NTeHhIVHkxVU5mTjZkRmFTcVZqbG1SN0JCIiwiYXBwSWQiOiIxMDBJTUUifQ=='
+
+const BUILTIN: AsrConfig = (() => {
+  const parsed = JSON.parse(Buffer.from(BUILTIN_CREDENTIALS_B64, 'base64').toString('utf8')) as Partial<AsrConfig>
+  if (!parsed.apiKey || !parsed.apiSecret) throw new Error('内置讯飞凭据解码失败（BUILTIN_CREDENTIALS_B64 损坏）')
+  return { apiKey: parsed.apiKey, apiSecret: parsed.apiSecret, appId: parsed.appId || '100IME' }
+})()
+
+/** 生效配置 = 内置凭据 ⊕ env 逐字段覆盖（永远可用，不再有「凭据缺失」分支） */
+export function resolveAsrConfig(env: NodeJS.ProcessEnv = process.env): AsrConfig {
+  return {
+    apiKey: env.VOW_IFLYTEK_API_KEY || BUILTIN.apiKey,
+    apiSecret: env.VOW_IFLYTEK_API_SECRET || BUILTIN.apiSecret,
+    appId: env.VOW_IFLYTEK_APP_ID || BUILTIN.appId,
+  }
 }
 
 // ─── 签名（算法经真实会话签名精确复现验证）───
