@@ -87,6 +87,8 @@ export interface StateUpdateRequest {
 export interface ConnectionInfo {
   connectedCount: number
   sessions: string[]
+  /** 当前生效的听写引擎（诊断用；凭据缺失时回落 win-dictation） */
+  dictationEngine: 'iflytek-api' | 'win-dictation'
 }
 
 // ─── 虚拟音频设备 ───

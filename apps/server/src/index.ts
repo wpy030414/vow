@@ -18,7 +18,20 @@ import { typeText } from './services/typing'
 import { ensureCert } from './services/tls-cert'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const repoRoot = resolve(__dirname, '..', '..')
+
+/** 上溯定位仓库根——dev（src/）与 prod（dist/）层级不同，以 pnpm-workspace.yaml 为锚 */
+function findRepoRoot(start: string): string {
+  let dir = start
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return resolve(start, '..', '..')
+}
+
+const repoRoot = findRepoRoot(__dirname)
 config({ path: join(repoRoot, '.env') })
 
 const PORT = parseInt(process.env.PORT || '48085', 10)

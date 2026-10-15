@@ -3,6 +3,8 @@
 import { Hono } from 'hono'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { sseHub } from '../services/sse-hub'
+import { resolveEngineConfig } from '../services/dictation'
+import { resolveAsrConfig } from '../services/iflytek-asr'
 import type {
   ConnectRequest, ConnectResponse,
   AudioChunk, AudioUploadResponse,
@@ -120,6 +122,10 @@ sseRoutes.post('/state', async (c) => {
 // ─── GET /api/sse/info — 连接信息 ───
 
 sseRoutes.get('/info', (c) => {
-  const info: ConnectionInfo = sseHub.getConnectionInfo()
+  const asrReady = resolveEngineConfig().engine === 'iflytek-api' && resolveAsrConfig() !== null
+  const info: ConnectionInfo = {
+    ...sseHub.getConnectionInfo(),
+    dictationEngine: asrReady ? 'iflytek-api' : 'win-dictation',
+  }
   return c.json(info)
 })
