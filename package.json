@@ -1,0 +1,18 @@
+{
+  "name": "vow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n server,web \"pnpm --filter @vow/server dev\" \"wait-on tcp:48085 && pnpm --filter @vow/web dev\"",
+    "build": "pnpm --filter @vow/server build && pnpm --filter @vow/web build",
+    "start": "pnpm --filter @vow/server start",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.4",
+    "typescript": "^5.9.3",
+    "wait-on": "^9.1.0"
+  }
+}
