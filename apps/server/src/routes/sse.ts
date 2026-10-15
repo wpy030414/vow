@@ -8,7 +8,7 @@ import type {
   StateUpdateRequest,
   ConnectionInfo,
 } from '@vow/shared/types'
-import { SSE_HEARTBEAT_MS } from '@vow/shared/constants'
+import { SSE_HEARTBEAT_MS, LOOPBACK_SAMPLE_RATE, LOOPBACK_CHANNELS } from '@vow/shared/constants'
 
 export const sseRoutes = new Hono()
 
@@ -48,7 +48,7 @@ sseRoutes.get('/stream', async (c) => {
     const base64 = btoa(binary)
     const event = {
       type: 'output_audio' as const,
-      payload: { data: base64, sampleRate: 44100, channels: 2, timestamp: Date.now() },
+      payload: { data: base64, sampleRate: LOOPBACK_SAMPLE_RATE, channels: LOOPBACK_CHANNELS, timestamp: Date.now() },
       timestamp: Date.now(),
     }
     const line = `data: ${JSON.stringify(event)}\n\n`

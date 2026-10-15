@@ -30,11 +30,13 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
   const audioContextRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
+  const startingRef = useRef(false)
   const sequenceRef = useRef(0)
   const callbackRef = useRef(onAudioData)
   callbackRef.current = onAudioData
 
   const stopRecording = useCallback(() => {
+    startingRef.current = false
     // 断开 processor
     if (processorRef.current) {
       try {
@@ -59,6 +61,13 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
 
   const startRecording = useCallback(async () => {
     setError(null)
+
+    // 重入护栏：正在启动 / 已有活跃链路时先清理，杜绝泄漏的第二套 AudioContext 持续采集
+    if (startingRef.current) return
+    if (audioContextRef.current || streamRef.current || processorRef.current) {
+      stopRecording()
+    }
+    startingRef.current = true
 
     try {
       // 1. 获取麦克风权限
@@ -109,6 +118,7 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       }
 
       setRecording(true)
+      startingRef.current = false
     } catch (err) {
       const msg = err instanceof DOMException
         ? err.name === 'NotAllowedError'

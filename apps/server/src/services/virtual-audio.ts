@@ -124,6 +124,7 @@ function base64ToFloat32(base64: string): Float32Array {
 
 export class VirtualAudioManager {
   private inputDeviceId: number | null = null
+  private inputDeviceName: string | null = null
   private outputDeviceId: number | null = null
   private inputActive = false
   private outputActive = false
@@ -132,6 +133,8 @@ export class VirtualAudioManager {
   private outputCapture: LoopbackCaptureInstance | null = null
   private ringBuffer = new RingBuffer(INPUT_RING_BUFFER_SAMPLES)
   private outputCallback: ((buf: Buffer) => void) | null = null
+  /** 上次输入流打开失败的时间戳——失败后 1s 内不重试，防止按 chunk 刷屏 */
+  private lastInputFailAt = 0
 
   // ─── 公开 API ───
 
@@ -139,7 +142,7 @@ export class VirtualAudioManager {
     return {
       virtualInputAvailable: this.inputDeviceId !== null,
       virtualOutputAvailable: this.outputDeviceId !== null,
-      inputDeviceName: this.inputDeviceId !== null ? `VB-Cable #${this.inputDeviceId}` : null,
+      inputDeviceName: this.inputDeviceId !== null ? (this.inputDeviceName ?? `VB-Cable #${this.inputDeviceId}`) : null,
       outputDeviceName: this.outputDeviceId !== null ? 'WASAPI Loopback' : null,
       inputActive: this.inputActive,
       outputActive: this.outputActive,
@@ -150,23 +153,14 @@ export class VirtualAudioManager {
 
   start(): void {
     const n = naudi()
-    const devices = n.getDevices()
-
     console.log('[VirtualAudio] scanning devices...')
 
-    for (const dev of devices) {
-      if (
-        dev.name.toUpperCase().includes(VB_CABLE_KEYWORD) &&
-        dev.maxOutputChannels > 0 &&
-        dev.hostAPIName === 'Windows WASAPI'
-      ) {
-        this.inputDeviceId = dev.id
-        console.log(`[VirtualAudio] Virtual input: "${dev.name}" (id=${dev.id})`)
-        break
-      }
-    }
-
-    if (!this.inputDeviceId) {
+    const dev = this.findCableDevice(n)
+    if (dev) {
+      this.inputDeviceId = dev.id
+      this.inputDeviceName = dev.name
+      console.log(`[VirtualAudio] Virtual input: "${dev.name}" (id=${dev.id})`)
+    } else {
       console.warn('[VirtualAudio] VB-Cable not found — virtual mic unavailable')
       console.warn('[VirtualAudio] run: pnpm -w run get-driver (as Administrator)')
     }
@@ -197,14 +191,74 @@ export class VirtualAudioManager {
   writeInputPCM(data: { data: string; sampleRate: number }): void {
     if (!this.inputDeviceId) return
     const float32 = base64ToFloat32(data.data)
-    this.ringBuffer.write(float32)
-    if (!this.inputActive && this.ringBuffer.available > 1024) {
+    if (float32.length === 0) return
+    // 手机实际采样率常为 48000，而 AudioIO 固定 44100 —— 必须重采样，
+    // 否则麦克风声音会被拉慢约 8.8% 并降调
+    const resampled = this.resampleTo44k(float32, data.sampleRate || 44100)
+    this.ringBuffer.write(resampled)
+    // 失败退避：上次打开失败 1s 内不重试（否则每个音频块都会刷一条错误）
+    if (
+      !this.inputActive &&
+      this.ringBuffer.available > 1024 &&
+      Date.now() - this.lastInputFailAt > 1000
+    ) {
       this.startInput()
     }
   }
 
+  /** 线性插值重采样 → 44100Hz */
+  private resampleTo44k(input: Float32Array, from: number): Float32Array {
+    if (from === 44100 || input.length === 0) return input
+    const ratio = from / 44100
+    const outLen = Math.max(1, Math.floor(input.length / ratio))
+    const out = new Float32Array(outLen)
+    for (let i = 0; i < outLen; i++) {
+      const pos = i * ratio
+      const i0 = Math.floor(pos)
+      const frac = pos - i0
+      const a = input[i0] ?? 0
+      const b = input[i0 + 1] ?? a
+      out[i] = a + (b - a) * frac
+    }
+    return out
+  }
+
+  /** 扫描 VB-Cable 渲染端点。
+   *  必须至少 2 个输出声道——写入的是交错立体声，单声道端点会损坏音频
+   *  （实测 "CABLE Input" 端点无双通道不可用，"CABLE In 16ch" 才有）。
+   *  多候选时优先恰好 2 声道的端点，其次取声道数最接近 2 的。 */
+  private findCableDevice(n: NaudiModule): NaudiDevice | null {
+    const candidates = n.getDevices().filter(
+      (d) =>
+        d.name.toUpperCase().includes(VB_CABLE_KEYWORD) &&
+        d.maxOutputChannels >= 2 &&
+        d.hostAPIName === 'Windows WASAPI',
+    )
+    if (candidates.length === 0) return null
+    candidates.sort((a, b) => Math.abs(a.maxOutputChannels - 2) - Math.abs(b.maxOutputChannels - 2))
+    return candidates[0]
+  }
+
   private startInput(): void {
     if (!this.inputDeviceId || this.inputActive) return
+    if (this.openInputStream()) return
+
+    // 打开失败：PortAudio 的设备枚举可能已漂移（tsx watch 硬杀进程后
+    // WASAPI 端点会重枚举，缓存的 id 失效报 "Invalid device"）——重扫重试一次
+    const n = naudi()
+    const dev = this.findCableDevice(n)
+    if (dev && dev.id !== this.inputDeviceId) {
+      console.warn(`[VirtualAudio] device drift: #${this.inputDeviceId} -> #${dev.id} ("${dev.name}") — retrying`)
+      this.inputDeviceId = dev.id
+      this.inputDeviceName = dev.name
+      if (this.openInputStream()) return
+    }
+    // 仍失败：记录退避时间戳，1s 后才允许再次尝试
+    this.lastInputFailAt = Date.now()
+  }
+
+  private openInputStream(): boolean {
+    if (this.inputDeviceId === null) return false
     const n = naudi()
 
     try {
@@ -219,26 +273,51 @@ export class VirtualAudioManager {
       })
 
       this.inputStream = stream
+
+      // 必须监听 error 事件——未处理的 'error' 会直接崩溃整个进程
+      stream.on('error', (err: unknown) => {
+        console.error('[VirtualAudio] input stream error:', String(err))
+        this.stopInput()
+        this.lastInputFailAt = Date.now()
+      })
+
       stream.start()
       this.inputActive = true
 
-      // 定时推送：每 ~23ms 从环形缓冲取 1024 样本写入声卡
-      // 1024 / 44100 ≈ 23.2ms —— 保持低延迟且不欠载
-      const CHUNK = 1024
+      // 定时推送：每 ~23ms 从环形缓冲取 1024 个单声道样本（1024/44100 ≈ 23.2ms，
+      // 与手机音频产率 44100 samples/s 匹配），复制为 2048 帧交错立体声写入声卡。
+      // 注意：AudioIO 是 2ch interleaved，若直接写单声道样本会被当作 L/R 交错导致音频损坏
+      const MONO_CHUNK = 1024
+      let idleTicks = 0
       this.inputTimer = setInterval(() => {
         if (!this.inputActive || !this.inputStream) return
-        const out = new Float32Array(CHUNK)
-        const read = this.ringBuffer.read(out)
+        const mono = new Float32Array(MONO_CHUNK)
+        const read = this.ringBuffer.read(mono)
         // 未读满的用静音填充
-        for (let i = read; i < CHUNK; i++) out[i] = 0
+        for (let i = read; i < MONO_CHUNK; i++) mono[i] = 0
+        const stereo = new Float32Array(MONO_CHUNK * 2)
+        for (let i = 0; i < MONO_CHUNK; i++) {
+          stereo[i * 2] = mono[i]
+          stereo[i * 2 + 1] = mono[i]
+        }
         try {
-          this.inputStream.write(Buffer.from(out.buffer))
+          this.inputStream.write(Buffer.from(stereo.buffer))
         } catch { /* stream closed */ }
+        // 空闲检测：连续 ~60 tick（约 1.4s）无新数据则关闭设备，
+        // 释放 CABLE（否则虚拟麦克风永远显示"使用中"）；新数据到达会自动重启
+        idleTicks = read < MONO_CHUNK / 4 ? idleTicks + 1 : 0
+        if (idleTicks > 60) {
+          console.log('[VirtualAudio] input idle — releasing VB-Cable device')
+          this.stopInput()
+        }
       }, 23)
 
       console.log('[VirtualAudio] input stream -> VB-Cable (44100Hz float32 stereo, 23ms timer)')
+      return true
     } catch (err) {
-      console.error('[VirtualAudio] input start failed:', err)
+      console.error('[VirtualAudio] input open failed:', err instanceof Error ? err.message : err)
+      this.lastInputFailAt = Date.now()
+      return false
     }
   }
 
@@ -267,16 +346,33 @@ export class VirtualAudioManager {
       const capture = new LC()
       this.outputCapture = capture
 
-      capture.startSystemAudio((chunk: Buffer) => {
+      // 排除自身进程树的环回：抓默认设备混音，但排除本进程渲染的音频。
+      // 若不排除，当默认播放设备 == CABLE In（手机麦克风的写入端）时，
+      // 麦克风音频会被 loopback 抓回并发给手机，形成"耳返"数字回环。
+      capture.start(process.pid, false, (chunk: Buffer) => {
         if (this.outputCallback) {
           this.outputCallback(chunk)
         }
       })
 
       this.outputActive = true
-      console.log('[VirtualAudio] output capture started (WASAPI loopback)')
+      console.log('[VirtualAudio] output capture started (WASAPI loopback, self-excluded)')
     } catch (err) {
-      console.error('[VirtualAudio] output start failed:', err)
+      // 排除模式失败时退回系统级捕获
+      try {
+        const capture = new LC()
+        this.outputCapture = capture
+        capture.startSystemAudio((chunk: Buffer) => {
+          if (this.outputCallback) {
+            this.outputCallback(chunk)
+          }
+        })
+        this.outputActive = true
+        console.warn('[VirtualAudio] process-excluded loopback failed, fell back to system audio:', String(err))
+        console.warn('[VirtualAudio] WARNING: 默认播放设备若为 CABLE In 会出现耳返回环')
+      } catch (err2) {
+        console.error('[VirtualAudio] output start failed:', err2)
+      }
     }
   }
 

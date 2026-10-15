@@ -28,6 +28,12 @@ export const SSE_INFO_PATH = '/api/sse/info'
 /** 默认采样率 */
 export const DEFAULT_SAMPLE_RATE = 44100
 
+/** 系统音频环回采样率（loopback-capture 在 Windows 上固定输出 48kHz / 16bit / stereo） */
+export const LOOPBACK_SAMPLE_RATE = 48000
+
+/** 系统音频环回声道数 */
+export const LOOPBACK_CHANNELS = 2
+
 /** ScriptProcessor 缓冲区大小（4096 / 44100 ≈ 93ms） */
 export const AUDIO_BUFFER_SIZE = 4096
 

@@ -18,7 +18,7 @@ export function App() {
   const [deviceStatus, setDeviceStatus] = useState<AudioDeviceStatus | null>(null)
 
   // Web Audio 输出播放器
-  const { play: playOutputAudio } = useAudioOutput()
+  const { play: playOutputAudio, unlock: unlockOutputAudio } = useAudioOutput()
 
   // output_audio 回调
   const onOutputAudio = useCallback((base64Data: string, sampleRate: number) => {
@@ -68,6 +68,8 @@ export function App() {
 
   // 输出设备开关 → 后端 API
   const handleToggleOutput = useCallback(async (on: boolean) => {
+    // 在手势内解锁输出 AudioContext（移动端要求，否则听不到声音）
+    if (on) unlockOutputAudio()
     setOutputEnabled(on)
     if (!sessionId) return
     try {
@@ -77,7 +79,7 @@ export function App() {
         body: JSON.stringify({ enabled: on }),
       })
     } catch { setOutputEnabled(!on) }
-  }, [sessionId])
+  }, [sessionId, unlockOutputAudio])
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background">
@@ -91,7 +93,10 @@ export function App() {
           <button
             type="button"
             disabled={connecting}
-            onClick={connect}
+            onClick={() => {
+              unlockOutputAudio() // 借用这次手势提前解锁输出播放
+              void connect()
+            }}
             className={cn(
               'w-full py-3 rounded-lg text-sm font-medium transition-colors',
               'bg-primary text-primary-foreground hover:bg-primary/90',

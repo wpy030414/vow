@@ -68,9 +68,9 @@ export function MicButton({ mode, recording, audioLevel, disabled, onStart, onSt
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
-        // 防止触屏滚动
-        onTouchStart={(e) => { e.preventDefault(); handlePointerDown() }}
-        onTouchEnd={(e) => { e.preventDefault(); handlePointerUp() }}
+        // 触屏防滚动（勿再绑 touch 事件——移动端 pointer+touch 会双触发，
+        // 曾导致 startRecording 重入、泄漏的 AudioContext 持续采集）
+        style={{ touchAction: 'none' }}
         className={cn(
           // 基础样式
           'relative z-10 w-28 h-28 rounded-full flex items-center justify-center',
