@@ -65,6 +65,10 @@ function parseWSFrame(buf, len) {
 function dumpWire(dir, buf, len) {
   if (len <= 0 || len > 1 << 20) return
   try {
+    // 全量 hex 吐给离线解析器（无损源数据，帧拼接/重同步在 Node 侧完成）
+    if (len <= 4096) {
+      out(dir === '>>>' ? 'c-hex' : 's-hex', `${len}B ${enc(new Uint8Array(buf.readByteArray(len)))}`)
+    }
     // HTTP 明文（握手请求/响应）直出
     const first = buf.readU8(0)
     const looksHttp = first === 0x47 || first === 0x48 // 'G'ET / 'H'TTP

@@ -1,7 +1,7 @@
 # iflytek-api 侦察结论（讯飞输入法私有 ASR 协议）
 
 > 侦察日期：2026-10-15 ｜ 工具链：frida 17.23（提权附加 iFlyVoice.exe，libssl-3/libcrypto-3 双钩 + 内存扫描）
-> 结论：**协议完全逆向完成，credentials 已提取并验证。** iflytek-api 引擎可直接开建。
+> 状态：**协议完全逆向 + 自建客户端回放验证通过。** 引擎可直接开建，无剩余未知数。
 
 ## 一、端点与鉴权（已实证）
 
@@ -11,43 +11,46 @@
 | 鉴权位置 | Query 参数 `authorization`（Base64 的 `hmac username="…", algorithm="hmac-sha256", headers="host date request-line", signature="…"`）|
 | api_key | `15461402826c8360ebcf1270cbba88e5`（输入法内置，内存中随 `que_user` 键存储）|
 | api_secret | `sH8v2wSSxxHTy1UNfN6dFaSqVjlmR7BB`（同址内存提取，**已用真实会话签名验证**）|
-| 签名算法 | `base64(HMAC-SHA256(secret, "host: 100ime-iat-api.xfyun.cn\ndate: <RFC1123 GMT>\nGET /v2/iat HTTP/1.1"))`（无尾换行；已验证复现 2026-10-15 15:28:44 会话签名）|
-| WS 子协议 | `dumb-increment-protocol` |
-| 网关 | Kong 1.3.0（`X-Kong-Upstream-Latency` 等回包头）|
-| 服务端版本指纹 | 客户端 `1.3.2.9.6.52`；识别引擎 `SLSpeechRecognizeCellEngine3`；`ver` 字段回显 |
+| 签名算法 | `base64(HMAC-SHA256(secret, "host: 100ime-iat-api.xfyun.cn\ndate: <RFC1123 GMT>\nGET /v2/iat HTTP/1.1"))`（无尾换行；已验证复现真实会话签名）|
+| WS 子协议 | 客户端发 `dumb-increment-protocol` 头，**服务端不回显**（不可走严格协商，ws 包需手动发头）|
+| 网关 | Kong 1.3.0 |
 
-## 二、WebSocket 帧协议（TLS 明文捕获）
+## 二、WebSocket 帧协议（已 100% 明文验证）
 
 ### 客户端 → 服务端（JSON 文本帧）
 
+**首帧**（business + common + 首块音频，合并一帧，`status:1`；**无独立 status:0 帧**）：
+
 ```json
-{"data": {"audio": "<base64>", "encoding": "opus-wb", "format": "audio/L16;rate=16000", "status": 0|1|2}}
+{
+  "business": {"aue": "opus-wb", "ent": "sms16k", "eos": 4000, "vad_enable": true, "vad_speech_tail": 4000, "vad_timeout": 4000},
+  "common": {"app_id": "100IME", "app.ver": "3.0.1750", "device.imei": "…", "device.imsi": "…", "device_id": "…", "uid": "261015230534696411"},
+  "data": {"audio": "<base64>", "encoding": "opus-wb", "format": "audio/L16;rate=16000", "status": 1}
+}
 ```
 
-- 音频编码：**Opus 宽频**（opus-wb），采样率基准 16000
-- `status`：0=首帧(携带 common/business)、1=传输中、2=结束
-- 首帧的 common/business 体（app_id 等）尚未捕获明文（缓冲粘连）→ **下一次会话补齐**
+**后续帧**：仅 `{"data": {audio, encoding, format, status:1}}`；**尾帧** `status:2`（携末块音频）。
+共 96 帧 ≈ 11 秒语音（帧间隔 ~60-100ms）。
 
 ### 服务端 → 客户端（JSON 文本帧）
 
-```json
-{"code":0,"message":"success","sid":"iat…","data":{"status":0|1|2,"result":{"sn":N,"ls":bool,"bg":0,"ed":0,"ws":[{"cw":[{"w":"字","wc":1,"wp":"n","lg":"tianjin",…}]}]}}}
-```
+**流式**：`{"code":0,"message":"success","sid":"iat…","data":{"result":{"sn":N,"ls":false,"ws":[{"cw":[{"w":"字",…}]}]},"status":0}}`
+**终止**：`{"…","data":{"result":{"sn":N+1,"ls":true,"ws":[{"cw":[{"w":"。"}],"ver":"1.3.2.9.6.52\r"}]},"status":2}}`
 
-- `ws[].cw[].w` = 逐字识别结果；`sn` 递增序号；`ls:true` + `status:2` = 结束帧
+- `ws[].cw[].w` = 逐字识别；`lg` = 口音识别；`ls:true` + `status:2` = 结束
 
-## 三、宿主进程架构
+## 三、验证记录
 
-- **iFlyVoice.exe**：语音引擎 + TLS 出口（libssl-3/libcrypto-3 惰性加载），会随语音面板启停而重启（PID 漂移）
-- iFlyPlatform.exe：网络聚合器（与 Voice 走 loopback），本连接不涉及 libssl
-- 配置记忆区含：`que_user`(api_key)、secret、设备指纹 `LRPC-fafa9621935f1a7cd0`
+- **签名验证**：`verify-secret.mjs` 用提取的 secret 精确复现真实会话签名（32 字节 base64 全等）
+- **回放验证**：`iflytek-probe.mjs` 自建 WebSocket 客户端（ws 包 + 手动子协议头），重放捕获的 96 帧真实音频 → 服务端返回转写「好的，我又说了一句话。」与实况逐字一致 ✅
 
 ## 四、vow `iflytek-api` 引擎实现要点
 
-1. **凭证明文入 .env**（`VOW_IFLYTEK_API_KEY` / `VOW_IFLYTEK_API_SECRET`），不再依赖输入法运行时
-2. 服务端直接消费 vow 的 PCM 流（16k 重采样）→ Opus 编码（推荐 `opusscript`，纯 JS 免编译）→ WS 推送
-3. 转写文本 → SendInput（`KEYEVENTF_UNICODE` 逐字符）打入焦点窗口；或先打到 vow 前端预览
-4. 待办：首帧 common/business 结构（下次真实会话抓明文）；`encoding:"raw"`(PCM) 是否也被接受（若可，直接省掉 Opus）
+1. **凭证明文入 .env**（`VOW_IFLYTEK_API_KEY` / `VOW_IFLYTEK_API_SECRET`），零输入法依赖
+2. 服务端消费 vow PCM（44100 base64）→ 16k 重采样 → **Opus 宽频编码**（`opusscript` 纯 JS）→ 60ms 一拍 JSON 帧
+3. 待实验：`encoding:"raw"`（PCM16 直发）是否被接受——若可，免 Opus 依赖（用 opusscript 解码捕获音频做对照实验）
+4. 转写文本 → SendInput（`KEYEVENTF_UNICODE`）打入焦点窗口；同步经 SSE 回显到手机端
+5. `uid` 生成规则（`YYMMDDhhmmss`+随机）与 device_id 复用策略按捕获样式照搬
 
 ## 五、合规备注
 
