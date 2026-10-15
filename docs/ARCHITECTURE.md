@@ -69,7 +69,7 @@
 | `routes/sse.ts` | SSE 端点管理（连接池、chunk 转发、状态上报） |
 | `routes/audio.ts` | 设备列表/状态、输出捕获开关 |
 | `services/sse-hub.ts` | 会话池、心跳/TTL 回收、事件广播 |
-| `services/virtual-audio.ts` | 虚拟音频设备（VB-CABLE 输入写入 + 环回输出捕获） |
+| `services/virtual-audio.ts` | 虚拟音频设备（输入写入 = @vow/portaudio(koffi→PortAudio, worker 线程)；环回输出捕获） |
 | `services/dictation.ts` | 语音转文字联动——Win+H 引擎（按键注入 + 翻转去重；env 显式启用） |
 | `services/win32-keys.ts` | 原生按键注入底层（koffi → user32 keybd_event，dictation/typing 共用） |
 | `services/typing.ts` | 转写文本注入——KEYEVENTF_UNICODE 逐码元打入焦点窗口（绕过输入法） |
@@ -87,3 +87,12 @@
 | `hooks/useSSE.ts` | SSE 连接管理 hook（含保活 ping） |
 | `hooks/useMicrophone.ts` | 麦克风采集 hook（getUserMedia + AudioContext） |
 | `hooks/useAudioOutput.ts` | 下行系统音频播放（Web Audio） |
+
+### packages/portaudio/（@vow/portaudio）
+
+| 模块 | 职责 |
+|------|------|
+| `src/index.ts` | 主线程侧 API：两级 createRequire 资源定位、worker 桥（超时/崩溃自动重启/优雅关闭）、输出流对象 |
+| `src/worker-source.ts` | eval/CJS worker 源码字符串：koffi 声明与全部 Pa_* 调用（独占线程） |
+| `src/types.ts` | 公开 API 与 worker 协议类型（协议测试守护同步） |
+| `bin/portaudio_x64.dll` | 自持 PortAudio（WASAPI x64，V19.7.0-devel），与 `LICENSE-PortAudio.txt` 同源注记 |

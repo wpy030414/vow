@@ -67,7 +67,7 @@ export const AUDIO_OUTPUT_PATH = '/api/audio/output'
 /** 输入环形缓冲大小（样本数，200ms @ 44100Hz） */
 export const INPUT_RING_BUFFER_SAMPLES = 8820
 
-/** 输出块大小（naudiodon 写入块） */
+/** 输出块大小（PortAudio 写入块） */
 export const OUTPUT_CHUNK_SAMPLES = 1024
 
 /** VB-Cable 设备名关键词 */

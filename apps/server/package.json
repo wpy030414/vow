@@ -12,9 +12,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gpeng/naudiodon": "^2.4.1",
     "@hono/node-server": "^1.19.17",
     "@types/ws": "^8.18.2",
+    "@vow/portaudio": "workspace:*",
     "@vow/shared": "workspace:*",
     "adm-zip": "^0.6.1",
     "dotenv": "^16.6.1",

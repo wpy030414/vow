@@ -67,7 +67,7 @@ if (existsSync(clientDir)) {
 }
 
 sseHub.start()
-virtualAudio.start()
+await virtualAudio.start()
 
 // ─── 听写联动接线 ───
 // 默认 iflytek-api（凭据 base64 内置，零配置）：hold 按下开 ASR 会话（消费 onAudioChunk 的 PCM）
@@ -112,13 +112,14 @@ console.log(`Server starting on https://localhost:${PORT}（听写引擎：${eng
 const { key, cert } = ensureCert()
 serve({ fetch: app.fetch, port: PORT, createServer: createHttpsServer, serverOptions: { key, cert } })
 
-const shutdown = () => {
+const shutdown = async () => {
   console.log('\nShutting down...')
   asrCtl?.cancel()
   dictation.releaseNow('shutdown')
-  virtualAudio.stop()
+  // PortAudio worker 宽限（其内部另有 2s 上限），超时即强制退出
+  await Promise.race([virtualAudio.stop(), new Promise((r) => setTimeout(r, 1500))])
   sseHub.stop()
   process.exit(0)
 }
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+process.on('SIGINT', () => { void shutdown() })
+process.on('SIGTERM', () => { void shutdown() })

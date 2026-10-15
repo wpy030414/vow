@@ -1,0 +1,2 @@
+# 二进制文件（防止 autocrlf/eol 转换损坏原生库）
+*.dll binary

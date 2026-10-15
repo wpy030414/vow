@@ -71,3 +71,13 @@
 - 讯飞输入法快捷键注入路线实测失败（F6 未唤起面板）且重度依赖输入法客户端（须安装/运行/焦点/快捷键配置），被判定不可接受，放弃
 - 私有协议经 frida 完整逆向并以真实会话回放验证（scripts/recon/FINDINGS.md，含签名 golden 向量）；实测端点接受 raw PCM 直发，免 opus 编码器；运行时零讯飞组件依赖
 **代价**：私有协议存在被服务端升级破坏的风险（用户已知悉并接受；Win+H 保底一行 env 可切回）；凭据为设备级，仅供本机个人使用。
+
+### A12：koffi FFI + 自持 PortAudio DLL 替换 naudiodon（安装链零编译）
+
+**决策**：虚拟麦克风链路（VB-Cable 写入）由 `@gpeng/naudiodon`（NAN 原生绑定，安装期 node-gyp 现场编译）迁移为自研 workspace 包 `@vow/portaudio`——koffi FFI（Node-API 预编译二进制随 npm 包分发）直连自持的 `portaudio_x64.dll`（PortAudio V19.7.0-devel，MIT，随仓库分发），全部 Pa_* 调用运行在独立 worker_threads 中；同时撤销此前的 pnpm patch 临时修复（commit 3eb4a6e）并移除 naudiodon 依赖。回归手段：`pnpm portaudio-check`（枚举 + 正弦写入冒烟）。
+**理由**：
+- Node 26 官方构建内置 `enable_thin_lto/lto_jobs` 变量，node-gyp <13 将其泄漏进 MSVC 工程（LNK1117），且 naudiodon 属 NAN 老式 ABI——**每台新机器、每次 Node 大版本升级都会复发**（上游修复：node-gyp 13.0.0 / PR #3331，但 pnpm/npm 当时仍捆绑 12.4.0）
+- koffi 为 Node-API 预编译、DLL 与 Node ABI 零耦合 → 永久免编译、免 VS2022/Python 前提；全新机器 `pnpm install` 实测 3.6s，与 Node 版本解耦
+- 与既有 `win32-keys.ts`（koffi → user32）同构，仓库统一 FFI 技术栈；FFI 声明经真实探针验证（枚举 40 设备 / 开流 / 阻塞写全 0 错误）
+- 阻塞式 `Pa_WriteStream` 放独立 worker（PaStream 有线程亲和性，不可用 koffi.async），主事件循环零阻塞；完整复刻 naudiodon 的「无流时新鲜枚举」（漂移重试的前提）、`defaultLowOutputLatency` 与 closeOnError 语义
+**代价**：自持 603KB 二进制（升级 PortAudio 须重跑 portaudio-check 并复核 `worker-source.ts` 结构体布局）；FFI 声明面改为自维护（协议测试 + 冒烟脚本 + 本记录三道防线）；worker 引入 eval 字符串层（协议类型集中于 `types.ts`，替身桥测试守护）。

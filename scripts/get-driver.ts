@@ -4,12 +4,14 @@
 // 驱动包缓存于 vendor/VBCABLE/，重复运行跳过下载
 
 import { createRequire } from 'node:module'
-import { exec } from 'node:child_process'
+import { exec, execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { createWriteStream, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { get } from 'node:https'
 import { pipeline } from 'node:stream/promises'
+import { createPortAudio } from '@vow/portaudio'
 
 const req = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -19,24 +21,26 @@ const VB_CABLE_DOWNLOAD_URL = 'https://download.vb-audio.com/Download_CABLE/VBCA
 const VB_CABLE_KEYWORD = 'CABLE'
 const VB_CABLE_SERVICE_NAME = 'VBAudioVACMME'
 const INSTALL_DIR = join(repoRoot, 'vendor', 'VBCABLE')
+const pa = createPortAudio()
+const execFileAsync = promisify(execFile)
 
 // ─── 工具 ───
 
 function log(msg: string) { console.log(`[get-driver] ${msg}`) }
 function warn(msg: string) { console.warn(`[get-driver] ⚠ ${msg}`) }
 
-function scanForCable(): boolean {
-  // 方式 1：naudiodon 设备扫描（最可靠）
+async function scanForCable(): Promise<boolean> {
+  // 方式 1：@vow/portaudio（koffi→PortAudio）设备扫描（最可靠）
   try {
-    const naudi = req('@gpeng/naudiodon') as { getDevices(): Array<{ id: number; name: string; maxInputChannels: number; maxOutputChannels: number }> }
-    if (naudi.getDevices().some(
+    const devices = await pa.getDevices()
+    if (devices.some(
       (d) => d.name.toUpperCase().includes(VB_CABLE_KEYWORD) && d.maxOutputChannels > 0,
     )) return true
   } catch { /* 回退到服务检测 */ }
 
-  // 方式 2：Windows 服务检测
+  // 方式 2：Windows 服务检测（execFile 异步真判真——旧版同步 exec 永不抛错，此前恒返回 true）
   try {
-    exec(`sc query ${VB_CABLE_SERVICE_NAME}`, { timeout: 3000 })
+    await execFileAsync('sc', ['query', VB_CABLE_SERVICE_NAME], { timeout: 3000 })
     // sc query 退出码 0 = 服务存在
     return true
   } catch { /* 不存在 */ }
@@ -106,21 +110,18 @@ async function install(infPath: string): Promise<void> {
 async function waitForDevice(timeoutMs = 30_000): Promise<boolean> {
   const start = Date.now()
   log('waiting for CABLE device to appear...')
-  return new Promise<boolean>((resolve) => {
-    const tick = () => {
-      if (scanForCable()) { log('CABLE device detected!'); resolve(true); return }
-      if (Date.now() - start > timeoutMs) { warn('timeout — CABLE device not found'); resolve(false); return }
-      setTimeout(tick, 2000)
-    }
-    tick()
-  })
+  for (;;) {
+    if (await scanForCable()) { log('CABLE device detected!'); return true }
+    if (Date.now() - start > timeoutMs) { warn('timeout — CABLE device not found'); return false }
+    await new Promise((r) => setTimeout(r, 2000))
+  }
 }
 
 // ─── 入口 ───
 
 async function main() {
   // 1. 快速检查
-  if (scanForCable()) {
+  if (await scanForCable()) {
     log('VB-Cable is already installed — nothing to do')
     return
   }
@@ -150,7 +151,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('[get-driver] fatal:', err)
-  process.exit(1)
-})
+main()
+  .catch((err) => {
+    console.error('[get-driver] fatal:', err)
+    process.exitCode = 1
+  })
+  .finally(async () => {
+    await pa.shutdown()
+  })

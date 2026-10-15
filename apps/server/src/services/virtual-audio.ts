@@ -1,27 +1,15 @@
 // VirtualAudioManager — 虚拟音频输入/输出设备管理
-// 输入：手机 PCM (SSE) → RingBuffer → naudiodon AudioIO → VB-Cable → 桌面应用
+// 输入：手机 PCM (SSE) → RingBuffer → @vow/portaudio（koffi→PortAudio，worker 线程）→ VB-Cable → 桌面应用
 // 输出：WASAPI loopback → loopback-capture → SSE → 手机
 
 import type { AudioDeviceStatus } from '@vow/shared/types'
 import { INPUT_RING_BUFFER_SAMPLES, VB_CABLE_KEYWORD } from '@vow/shared/constants'
+import { getPortAudio } from '@vow/portaudio'
+import type { PortAudioApi, PortAudioDevice, PortAudioOutputStream } from '@vow/portaudio'
 
-// 类型声明：无 TS 类型的原生模块
-// 放在单独 .d.ts 中以避免块级重声明问题
-
-// 内联类型：naudiodon 相关
-interface NaudiDevice {
-  id: number; name: string; maxInputChannels: number; maxOutputChannels: number; hostAPIName: string
-}
-interface NaudiModule {
-  SampleFormatFloat32: number
-  getDevices(): NaudiDevice[]
-  AudioIO(opts: { outOptions: { channelCount: number; sampleFormat: number; sampleRate: number; deviceId?: number; closeOnError?: boolean } }): NaudiAudioIO
-}
-interface NaudiAudioIO {
-  start(): void; quit(): void; abort(): void
-  on(event: string, cb: (...args: unknown[]) => void): this
-  write(chunk: Buffer | string, cb?: (err?: Error | null) => void): boolean
-}
+// 固定输出格式：手机实际采样率常为 48000，而虚拟声卡链路固定 44100 —— 由 resampleTo44k 负责对齐
+const OUTPUT_SAMPLE_RATE = 44100
+const OUTPUT_CHANNELS = 2
 
 // 内联类型：loopback-capture 相关
 interface LoopbackCaptureInstance {
@@ -34,19 +22,10 @@ interface LoopbackCaptureModule {
   path: string
 }
 
-// ─── 动态加载 ───
+// ─── 动态加载（loopback-capture 为 N-API 预编译包，无需现场编译）───
 
 import { createRequire } from 'node:module'
 const req = createRequire(import.meta.url)
-
-let _naudiodon: NaudiModule | null = null
-function naudi(): NaudiModule {
-  if (!_naudiodon) {
-    _naudiodon = req('@gpeng/naudiodon') as NaudiModule
-    console.log('[VirtualAudio] @gpeng/naudiodon loaded')
-  }
-  return _naudiodon
-}
 
 let _LoopbackCaptureCtor: (new () => LoopbackCaptureInstance) | null = null
 function lcCtor(): new () => LoopbackCaptureInstance {
@@ -56,6 +35,24 @@ function lcCtor(): new () => LoopbackCaptureInstance {
     console.log('[VirtualAudio] loopback-capture loaded')
   }
   return _LoopbackCaptureCtor
+}
+
+// ─── 设备选择（纯函数，供单测直测）───
+
+/** 扫描 VB-Cable 渲染端点。
+ *  必须至少 2 个输出声道——写入的是交错立体声，单声道端点会损坏音频
+ *  （实测 "CABLE Input" 端点无双通道不可用，"CABLE In 16ch" 才有）。
+ *  多候选时优先恰好 2 声道的端点，其次取声道数最接近 2 的。 */
+export function selectCableDevice(devices: PortAudioDevice[]): PortAudioDevice | null {
+  const candidates = devices.filter(
+    (d) =>
+      d.name.toUpperCase().includes(VB_CABLE_KEYWORD) &&
+      d.maxOutputChannels >= 2 &&
+      d.hostAPIName === 'Windows WASAPI',
+  )
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => Math.abs(a.maxOutputChannels - 2) - Math.abs(b.maxOutputChannels - 2))
+  return candidates[0]
 }
 
 // ─── 环形缓冲 ───
@@ -128,13 +125,18 @@ export class VirtualAudioManager {
   private outputDeviceId: number | null = null
   private inputActive = false
   private outputActive = false
-  private inputStream: NaudiAudioIO | null = null
+  private inputStream: PortAudioOutputStream | null = null
   private inputTimer: ReturnType<typeof setInterval> | null = null
+  /** startInput 重入锁：writeInputPCM 以音频块频率触发，防止并发开流 */
+  private inputOpening = false
   private outputCapture: LoopbackCaptureInstance | null = null
   private ringBuffer = new RingBuffer(INPUT_RING_BUFFER_SAMPLES)
   private outputCallback: ((buf: Buffer) => void) | null = null
   /** 上次输入流打开失败的时间戳——失败后 1s 内不重试，防止按 chunk 刷屏 */
   private lastInputFailAt = 0
+
+  /** @param pa 注入 PortAudio 实现（默认进程内单例；测试注入替身） */
+  constructor(private readonly pa: PortAudioApi = getPortAudio()) {}
 
   // ─── 公开 API ───
 
@@ -151,11 +153,16 @@ export class VirtualAudioManager {
     }
   }
 
-  start(): void {
-    const n = naudi()
+  async start(): Promise<void> {
     console.log('[VirtualAudio] scanning devices...')
+    let devices: PortAudioDevice[] = []
+    try {
+      devices = await this.pa.getDevices()
+    } catch (err) {
+      console.warn('[VirtualAudio] device scan failed:', err instanceof Error ? err.message : err)
+    }
 
-    const dev = this.findCableDevice(n)
+    const dev = selectCableDevice(devices)
     if (dev) {
       this.inputDeviceId = dev.id
       this.inputDeviceName = dev.name
@@ -179,10 +186,11 @@ export class VirtualAudioManager {
     console.log('[VirtualAudio] status:', this.getDeviceStatus())
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopInput()
     this.stopOutput()
     this.ringBuffer.clear()
+    await this.pa.shutdown()
     console.log('[VirtualAudio] stopped')
   }
 
@@ -192,24 +200,25 @@ export class VirtualAudioManager {
     if (!this.inputDeviceId) return
     const float32 = base64ToFloat32(data.data)
     if (float32.length === 0) return
-    // 手机实际采样率常为 48000，而 AudioIO 固定 44100 —— 必须重采样，
+    // 手机实际采样率常为 48000，而输出链路固定 44100 —— 必须重采样，
     // 否则麦克风声音会被拉慢约 8.8% 并降调
-    const resampled = this.resampleTo44k(float32, data.sampleRate || 44100)
+    const resampled = this.resampleTo44k(float32, data.sampleRate || OUTPUT_SAMPLE_RATE)
     this.ringBuffer.write(resampled)
     // 失败退避：上次打开失败 1s 内不重试（否则每个音频块都会刷一条错误）
     if (
       !this.inputActive &&
+      !this.inputOpening &&
       this.ringBuffer.available > 1024 &&
       Date.now() - this.lastInputFailAt > 1000
     ) {
-      this.startInput()
+      void this.startInput()
     }
   }
 
   /** 线性插值重采样 → 44100Hz */
   private resampleTo44k(input: Float32Array, from: number): Float32Array {
-    if (from === 44100 || input.length === 0) return input
-    const ratio = from / 44100
+    if (from === OUTPUT_SAMPLE_RATE || input.length === 0) return input
+    const ratio = from / OUTPUT_SAMPLE_RATE
     const outLen = Math.max(1, Math.floor(input.length / ratio))
     const out = new Float32Array(outLen)
     for (let i = 0; i < outLen; i++) {
@@ -223,70 +232,57 @@ export class VirtualAudioManager {
     return out
   }
 
-  /** 扫描 VB-Cable 渲染端点。
-   *  必须至少 2 个输出声道——写入的是交错立体声，单声道端点会损坏音频
-   *  （实测 "CABLE Input" 端点无双通道不可用，"CABLE In 16ch" 才有）。
-   *  多候选时优先恰好 2 声道的端点，其次取声道数最接近 2 的。 */
-  private findCableDevice(n: NaudiModule): NaudiDevice | null {
-    const candidates = n.getDevices().filter(
-      (d) =>
-        d.name.toUpperCase().includes(VB_CABLE_KEYWORD) &&
-        d.maxOutputChannels >= 2 &&
-        d.hostAPIName === 'Windows WASAPI',
-    )
-    if (candidates.length === 0) return null
-    candidates.sort((a, b) => Math.abs(a.maxOutputChannels - 2) - Math.abs(b.maxOutputChannels - 2))
-    return candidates[0]
-  }
+  private async startInput(): Promise<void> {
+    if (this.inputDeviceId === null || this.inputActive || this.inputOpening) return
+    this.inputOpening = true
+    try {
+      if (await this.openInputStream()) return
 
-  private startInput(): void {
-    if (!this.inputDeviceId || this.inputActive) return
-    if (this.openInputStream()) return
-
-    // 打开失败：PortAudio 的设备枚举可能已漂移（tsx watch 硬杀进程后
-    // WASAPI 端点会重枚举，缓存的 id 失效报 "Invalid device"）——重扫重试一次
-    const n = naudi()
-    const dev = this.findCableDevice(n)
-    if (dev && dev.id !== this.inputDeviceId) {
-      console.warn(`[VirtualAudio] device drift: #${this.inputDeviceId} -> #${dev.id} ("${dev.name}") — retrying`)
-      this.inputDeviceId = dev.id
-      this.inputDeviceName = dev.name
-      if (this.openInputStream()) return
+      // 打开失败：PortAudio 的设备枚举可能已漂移（tsx watch 硬杀进程后
+      // WASAPI 端点会重枚举，缓存的 id 失效报 "Invalid device"）——重扫重试一次
+      let dev: PortAudioDevice | null = null
+      try {
+        dev = selectCableDevice(await this.pa.getDevices())
+      } catch (err) {
+        console.warn('[VirtualAudio] device rescan failed:', err instanceof Error ? err.message : err)
+      }
+      if (dev && dev.id !== this.inputDeviceId) {
+        console.warn(`[VirtualAudio] device drift: #${this.inputDeviceId} -> #${dev.id} ("${dev.name}") — retrying`)
+        this.inputDeviceId = dev.id
+        this.inputDeviceName = dev.name
+        if (await this.openInputStream()) return
+      }
+      // 仍失败：记录退避时间戳，1s 后才允许再次尝试
+      this.lastInputFailAt = Date.now()
+    } finally {
+      this.inputOpening = false
     }
-    // 仍失败：记录退避时间戳，1s 后才允许再次尝试
-    this.lastInputFailAt = Date.now()
   }
 
-  private openInputStream(): boolean {
+  private async openInputStream(): Promise<boolean> {
     if (this.inputDeviceId === null) return false
-    const n = naudi()
 
     try {
-      const stream = n.AudioIO({
-        outOptions: {
-          channelCount: 2,
-          sampleFormat: n.SampleFormatFloat32,
-          sampleRate: 44100,
-          deviceId: this.inputDeviceId,
-          closeOnError: true,
-        },
+      const stream = await this.pa.openOutput({
+        deviceId: this.inputDeviceId,
+        sampleRate: OUTPUT_SAMPLE_RATE,
+        channelCount: OUTPUT_CHANNELS,
       })
 
       this.inputStream = stream
 
-      // 必须监听 error 事件——未处理的 'error' 会直接崩溃整个进程
-      stream.on('error', (err: unknown) => {
-        console.error('[VirtualAudio] input stream error:', String(err))
+      // 必须注册 error 回调——流出错时释放并进入退避（原 naudiodon closeOnError 语义）
+      stream.onError((err) => {
+        console.error('[VirtualAudio] input stream error:', err.message)
         this.stopInput()
         this.lastInputFailAt = Date.now()
       })
 
-      stream.start()
       this.inputActive = true
 
       // 定时推送：每 ~23ms 从环形缓冲取 1024 个单声道样本（1024/44100 ≈ 23.2ms，
       // 与手机音频产率 44100 samples/s 匹配），复制为 2048 帧交错立体声写入声卡。
-      // 注意：AudioIO 是 2ch interleaved，若直接写单声道样本会被当作 L/R 交错导致音频损坏
+      // 注意：输出链路是 2ch interleaved，若直接写单声道样本会被当作 L/R 交错导致音频损坏
       const MONO_CHUNK = 1024
       let idleTicks = 0
       this.inputTimer = setInterval(() => {
@@ -301,7 +297,7 @@ export class VirtualAudioManager {
           stereo[i * 2 + 1] = mono[i]
         }
         try {
-          this.inputStream.write(Buffer.from(stereo.buffer))
+          this.inputStream.write(stereo)
         } catch { /* stream closed */ }
         // 空闲检测：连续 ~60 tick（约 1.4s）无新数据则关闭设备，
         // 释放 CABLE（否则虚拟麦克风永远显示"使用中"）；新数据到达会自动重启
@@ -324,7 +320,7 @@ export class VirtualAudioManager {
   private stopInput(): void {
     if (this.inputTimer) { clearInterval(this.inputTimer); this.inputTimer = null }
     if (this.inputStream) {
-      try { this.inputStream.quit() } catch { /* noop */ }
+      void this.inputStream.stop().catch(() => { /* stream closed */ })
       this.inputStream = null
     }
     this.inputActive = false

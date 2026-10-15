@@ -4,16 +4,22 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@gpeng/naudiodon@2.4.1': 0511fa45092dda327049dc169da0913f80e6d5963a6ad01dc5101b8a06dd6769
-
 importers:
 
   .:
     devDependencies:
+      '@vow/portaudio':
+        specifier: workspace:*
+        version: link:packages/portaudio
+      adm-zip:
+        specifier: ^0.6.1
+        version: 0.6.1
       concurrently:
         specifier: ^9.2.4
         version: 9.2.5
+      is-elevated:
+        specifier: ^4.0.0
+        version: 4.0.0
       opusscript:
         specifier: ^0.1.1
         version: 0.1.1
@@ -32,15 +38,15 @@ importers:
 
   apps/server:
     dependencies:
-      '@gpeng/naudiodon':
-        specifier: ^2.4.1
-        version: 2.4.1(patch_hash=0511fa45092dda327049dc169da0913f80e6d5963a6ad01dc5101b8a06dd6769)
       '@hono/node-server':
         specifier: ^1.19.17
         version: 1.19.17(hono@4.13.13)
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      '@vow/portaudio':
+        specifier: workspace:*
+        version: link:../../packages/portaudio
       '@vow/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -172,6 +178,19 @@ importers:
       vite:
         specifier: ^8.2.2
         version: 8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(jiti@1.21.7)(tsx@4.23.15)
+
+  packages/portaudio:
+    dependencies:
+      koffi:
+        specifier: ^3.3.3
+        version: 3.3.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.17.0
+        version: 22.20.5
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/shared:
     devDependencies:
@@ -776,9 +795,6 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
-
-  '@gpeng/naudiodon@2.4.1':
-    resolution: {integrity: sha512-fk/xK5xxzzeMJR72OiM+eDFaqhw34vP/C+z87+sjS9Ge9O7IdJZoGwANanf0Przpvyixb4RIZBN3DyM2ZvgGoQ==}
 
   '@hapi/address@5.1.1':
     resolution: {integrity: sha512-A+po2d/dVoY7cYajycYI43ZbYMXukuopIsqCjh5QzsBCipDtdofHntljDlpccMjIfTy6UOkg+5KPriwYch2bXA==}
@@ -3485,10 +3501,6 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
 
   '@floating-ui/utils@0.2.12': {}
-
-  '@gpeng/naudiodon@2.4.1(patch_hash=0511fa45092dda327049dc169da0913f80e6d5963a6ad01dc5101b8a06dd6769)':
-    dependencies:
-      bindings: 1.5.0
 
   '@hapi/address@5.1.1':
     dependencies:

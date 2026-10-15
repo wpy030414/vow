@@ -11,7 +11,7 @@ export const audioRoutes = new Hono()
 
 audioRoutes.get('/devices', (c) => {
   const status: AudioDeviceStatus = virtualAudio.getDeviceStatus()
-  // 枚举 naudiodon 可见设备
+  // 枚举 PortAudio 可见设备
   const list: DeviceListResponse = { status, devices: [] }
   return c.json(list)
 })

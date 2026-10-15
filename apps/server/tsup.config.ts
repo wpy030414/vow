@@ -5,5 +5,5 @@ export default defineConfig({
   format: ['esm'],
   clean: true,
   outDir: 'dist',
-  noExternal: ['@vow/shared'],
+  noExternal: ['@vow/shared', '@vow/portaudio'],
 })

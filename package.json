@@ -9,10 +9,14 @@
     "start": "pnpm --filter @vow/server start",
     "test": "pnpm -r test",
     "get-driver": "tsx scripts/get-driver.ts",
+    "portaudio-check": "tsx scripts/portaudio-check.ts",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
+    "@vow/portaudio": "workspace:*",
+    "adm-zip": "^0.6.1",
     "concurrently": "^9.2.4",
+    "is-elevated": "^4.0.0",
     "opusscript": "^0.1.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
