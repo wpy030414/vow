@@ -62,3 +62,12 @@
 | Linux | PulseAudio module-null-sink | `pactl` 命令 |
 
 **MVP 阶段**：优先实现 Linux PulseAudio 方案（开发环境），Windows 通过 WASAPI 或第三方虚拟音频驱动实现。
+
+### A11：语音转文字双引擎路线——Win+H 现役 + 讯飞私有 API 直连演进
+
+**决策**：联动信号链（hold 翻转 → 唤起/结束）保持引擎无关；引擎仅两条路线：`win-dictation`（koffi → user32 keybd_event 注入 Win+H，toggle 语义）与 `iflytek-api`（服务端直连讯飞私有 ASR 协议：PCM → 文本 → SendInput 打字，演进中，落地前回落 win-dictation）。
+**理由**：
+- Claude Code 原生 voice 模式为纯云端转写 + claude.ai OAuth 三重 gate（本机代理环境不可用），排除
+- 讯飞输入法快捷键注入路线已实测放弃：F6 注入未唤起语音面板，且重度依赖输入法客户端（须安装/运行/焦点/快捷键配置）被判定不可接受
+- 用户明确接受逆向私有 API 的维护成本（"碎了再说"），Win+H 保留为保底
+**代价**：Win+H 依赖 Windows 在线语音识别与默认麦克风选择；私有 API 存在签名/加密且可能随时变更的风险。

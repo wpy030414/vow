@@ -28,6 +28,9 @@ export class SSEHub {
   private reapTimer: ReturnType<typeof setInterval> | null = null
   private listeners = new Set<HubEventListener>()
 
+  /** 听写联动回调——某会话的听写态翻转时触发；会话销毁时若听写仍开着则强制释放 */
+  onDictationChange: ((active: boolean, sessionId: string, reason: 'toggle' | 'release') => void) | null = null
+
   // ─── 生命周期 ───
 
   start() {
@@ -61,6 +64,7 @@ export class SSEHub {
         mode,
         recording: false,
         isOutputEnabled: false,
+        dictation: false,
         audioLevel: 0,
       },
       writer: null,
@@ -75,6 +79,11 @@ export class SSEHub {
   destroySession(id: string) {
     const session = this.sessions.get(id)
     if (!session) return
+    // 会话销毁时若听写仍开着，强制释放（页面关闭/断线/TTL 回收路径）
+    if (session.state.dictation) {
+      session.state.dictation = false
+      this.onDictationChange?.(false, id, 'release')
+    }
     void this.closeWriter(session.writer, id)
     this.sessions.delete(id)
     console.log(`[SSE Hub] session destroyed: ${id} (${this.sessions.size} active)`)
@@ -132,8 +141,15 @@ export class SSEHub {
     if (update.recording !== undefined) session.state.recording = update.recording
     if (update.mode !== undefined) session.state.mode = update.mode
     if (update.isOutputEnabled !== undefined) session.state.isOutputEnabled = update.isOutputEnabled
+    const prevDictation = session.state.dictation
+    if (update.dictation !== undefined) session.state.dictation = update.dictation
     if (update.audioLevel !== undefined) session.state.audioLevel = update.audioLevel
     session.lastHeartbeat = Date.now()
+
+    // 听写态翻转 → 通知联动回调（重复上报同值不触发）
+    if (update.dictation !== undefined && update.dictation !== prevDictation) {
+      this.onDictationChange?.(update.dictation, sessionId, 'toggle')
+    }
 
     // 广播状态变化给其他客户端
     this.notifyListeners(sessionId, {

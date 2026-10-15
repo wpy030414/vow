@@ -20,6 +20,7 @@
     "drizzle-orm": "1.0.0-rc.4",
     "hono": "^4.13.7",
     "is-elevated": "^4.0.0",
+    "koffi": "^3.3.3",
     "loopback-capture": "^3.0.2"
   },
   "devDependencies": {

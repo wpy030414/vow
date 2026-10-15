@@ -4,5 +4,6 @@ packages:
 allowBuilds:
   '@gpeng/naudiodon': true
   esbuild: true
+  koffi: false
   naudiodon: true
   segfault-handler: true

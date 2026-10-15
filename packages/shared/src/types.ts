@@ -66,6 +66,8 @@ export interface DeviceState {
   mode: RecordMode
   recording: boolean
   isOutputEnabled: boolean
+  /** 听写联动是否激活（hold 按下且开启「转文字」） */
+  dictation: boolean
   audioLevel: number
 }
 
@@ -74,6 +76,8 @@ export interface StateUpdateRequest {
   recording?: boolean
   mode?: RecordMode
   isOutputEnabled?: boolean
+  /** 听写联动请求（服务端检测到翻转时注入听写引擎快捷键） */
+  dictation?: boolean
   audioLevel?: number
 }
 

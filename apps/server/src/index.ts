@@ -11,6 +11,7 @@ import { audioRoutes } from './routes/audio'
 import { sseRoutes } from './routes/sse'
 import { sseHub } from './services/sse-hub'
 import { virtualAudio } from './services/virtual-audio'
+import { dictation } from './services/dictation'
 import { ensureCert } from './services/tls-cert'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -65,12 +66,19 @@ virtualAudio.setOutputCallback((pcm: Buffer) => {
   sseHub.broadcastOutputAudio(pcm)
 })
 
+// 听写联动：hold 按下（前端开「转文字」）→ 注入快捷键唤起听写引擎（讯飞 F6 / Win+H）；
+// 松开或会话销毁（页面关闭/断线/TTL 回收）→ 结束。引擎配置见 services/dictation.ts 与 .env
+sseHub.onDictationChange = (active, sessionId, reason) => {
+  void dictation.setDesired(active, `${reason}:${sessionId}`)
+}
+
 console.log(`Server starting on https://localhost:${PORT}`)
 const { key, cert } = ensureCert()
 serve({ fetch: app.fetch, port: PORT, createServer: createHttpsServer, serverOptions: { key, cert } })
 
 const shutdown = () => {
   console.log('\nShutting down...')
+  dictation.releaseNow('shutdown')
   virtualAudio.stop()
   sseHub.stop()
   process.exit(0)

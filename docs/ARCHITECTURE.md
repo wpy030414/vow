@@ -38,6 +38,15 @@
   → SSE push → 手机 Web Audio API → AudioContext → 手机扬声器
 ```
 
+### 听写联动链路（可选：Hold + 「转文字」）
+
+```
+手机按下（hold + 转文字开）→ POST /api/sse/state {dictation:true}
+  → SSEHub 翻转检测 → services/dictation 注入快捷键（讯飞 F6 / Win+H）
+  → 听写引擎从虚拟麦克风（CABLE）取音 → 转写文本插入当前焦点窗口
+  松开/页面关闭/TTL 回收 → 注入停止键或交由引擎静音自动结束
+```
+
 ## 技术决策
 
 | # | 决策 | 理由 |
@@ -54,20 +63,22 @@
 
 | 模块 | 职责 |
 |------|------|
-| `index.ts` | 入口，挂载路由 + 静态文件 |
-| `routes/sse.ts` | SSE 端点管理（连接池、chunk 转发） |
-| `services/audio-input.ts` | 虚拟音频输入设备管理 |
-| `services/audio-output.ts` | 虚拟音频输出设备管理 |
-| `services/device-manager.ts` | 设备注册/注销、连接状态管理 |
+| `index.ts` | 入口，挂载路由 + 静态文件 + 音频/听写联动接线 |
+| `routes/sse.ts` | SSE 端点管理（连接池、chunk 转发、状态上报） |
+| `routes/audio.ts` | 设备列表/状态、输出捕获开关 |
+| `services/sse-hub.ts` | 会话池、心跳/TTL 回收、事件广播 |
+| `services/virtual-audio.ts` | 虚拟音频设备（VB-CABLE 输入写入 + 环回输出捕获） |
+| `services/dictation.ts` | 语音转文字联动——按键注入唤起听写引擎（koffi → keybd_event） |
+| `services/tls-cert.ts` | 自签证书生成（HTTPS 安全上下文） |
 
 ### apps/web/
 
 | 模块 | 职责 |
 |------|------|
-| `App.tsx` | 主布局，连接状态上下文 |
+| `App.tsx` | 主布局，连接状态与联动状态汇总 |
 | `components/MicButton.tsx` | 录制按钮（Hold/Tap 双模式） |
-| `components/ModeSelector.tsx` | Hold/Tap 模式切换 |
-| `components/OutputToggle.tsx` | "作为输出设备"开关 |
-| `components/ConnectionStatus.tsx` | 连接状态指示 |
-| `hooks/useSSE.ts` | SSE 连接管理 hook |
+| `components/ControlBar.tsx` | 融合控制栏（Hold/Tap + Listen + 「转文字」开关） |
+| `components/VolumeIndicator.tsx` | 实时音量指示 |
+| `hooks/useSSE.ts` | SSE 连接管理 hook（含保活 ping） |
 | `hooks/useMicrophone.ts` | 麦克风采集 hook（getUserMedia + AudioContext） |
+| `hooks/useAudioOutput.ts` | 下行系统音频播放（Web Audio） |

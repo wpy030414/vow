@@ -11,9 +11,15 @@ import { WifiOff } from 'lucide-react'
 import { cn } from './lib/utils'
 import type { RecordMode, AudioDeviceStatus } from '@vow/shared/types'
 
+/** 「转文字」开关的本地持久化 key */
+const DICTATION_STORAGE_KEY = 'vow.dictation-enabled'
+
 export function App() {
   const [mode, setMode] = useState<RecordMode>('tap')
   const [isOutputEnabled, setOutputEnabled] = useState(false)
+  const [dictationEnabled, setDictationEnabled] = useState<boolean>(
+    () => localStorage.getItem(DICTATION_STORAGE_KEY) === '1',
+  )
   const [deviceStatus, setDeviceStatus] = useState<AudioDeviceStatus | null>(null)
 
   // Web Audio 输出播放器
@@ -69,11 +75,12 @@ export function App() {
 
   const { recording, audioLevel, error: micError, startRecording, stopRecording } = useMicrophone({ onAudioData })
 
-  // 录音状态变化 → 同步服务端
+  // 录音状态变化 → 同步服务端（听写联动：仅 hold 模式 + 「转文字」开启 + 录音中激活）
   useEffect(() => {
     if (!sessionId) return
-    updateState({ recording, audioLevel }).catch(() => {})
-  }, [recording, sessionId, updateState])
+    const dictationActive = recording && dictationEnabled && mode === 'hold'
+    updateState({ recording, audioLevel, dictation: dictationActive }).catch(() => {})
+  }, [recording, sessionId, updateState, dictationEnabled, mode])
 
   // 模式切换
   const handleModeChange = useCallback((newMode: RecordMode) => {
@@ -96,6 +103,14 @@ export function App() {
       })
     } catch { setOutputEnabled(!on) }
   }, [sessionId, unlockOutputAudio])
+
+  // 「转文字」开关——本地持久化；生效条件在上方 effect 中计算（hold + 录音中）
+  const handleToggleDictation = useCallback((on: boolean) => {
+    setDictationEnabled(on)
+    try {
+      localStorage.setItem(DICTATION_STORAGE_KEY, on ? '1' : '0')
+    } catch { /* 隐私模式等场景 */ }
+  }, [])
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background">
@@ -142,6 +157,9 @@ export function App() {
               modeDisabled={recording}
               outputEnabled={isOutputEnabled}
               onOutputChange={handleToggleOutput}
+              dictationEnabled={dictationEnabled}
+              onDictationChange={handleToggleDictation}
+              dictationDisabled={recording || mode !== 'hold'}
             />
 
             <div className="pt-4">
