@@ -7,10 +7,11 @@
 // - 令牌持久于 .vow/pairing-token（gitignored）：重启 / tsx watch 不丢配对；
 //   轮换 = pnpm pair --rotate（全部旧 cookie 立即失效）
 // - 中间件接受 cookie 或 Authorization: Bearer（CLI 冒烟通道）
+// - 热加载：fs.watch 监听配对令牌文件——pnpm pair --rotate 写入新令牌后无需重启服务
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, watch } from 'node:fs'
+import { basename, join } from 'node:path'
 import type { MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
 
@@ -46,15 +47,46 @@ export function tokenEquals(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb)
 }
 
+// ─── 热加载令牌容器 ───
+
+/** 可热加载的令牌容器：fs.watch 监听文件变化，pnpm pair --rotate 后无需重启 */
+export function createTokenStore(vowDir: string) {
+  let token = loadOrCreateToken(vowDir)
+  const tokenFile = join(vowDir, TOKEN_FILE)
+
+  const w = watch(tokenFile, (eventType) => {
+    if (eventType !== 'change') return
+    try {
+      const raw = readFileSync(tokenFile, 'utf-8').trim()
+      if (raw && raw !== token) {
+        console.log('[Auth] 检测到令牌文件变化，已热加载（新令牌长度 %d）', raw.length)
+        token = raw
+      }
+    } catch {
+      // 竞态：文件可能还在写入中
+    }
+  })
+
+  return {
+    get token() {
+      return token
+    },
+    close() {
+      w.close()
+    },
+  }
+}
+
 // ─── 中间件 ───
 
-/** 校验 cookie 或 Authorization: Bearer；失败统一 401 JSON */
-export function createAuthMiddleware(token: string): MiddlewareHandler {
+/** 校验 cookie 或 Authorization: Bearer；失败统一 401 JSON。
+ *  @param getToken 令牌获取函数——每次请求调用，配合 createTokenStore 实现热加载 */
+export function createAuthMiddleware(getToken: () => string): MiddlewareHandler {
   return async (c, next) => {
     const header = c.req.header('Authorization')
     const bearer = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined
     const candidate = getCookie(c, AUTH_COOKIE_NAME) ?? bearer
-    if (candidate && tokenEquals(candidate, token)) {
+    if (candidate && tokenEquals(candidate, getToken())) {
       await next()
       return
     }

@@ -15,7 +15,7 @@ import { loadNativeKeys } from './services/win32-keys'
 import { createAsrDictation, resolveAsrConfig, type AsrDictation } from './services/iflytek-asr'
 import { typeText } from './services/typing'
 import { ensureCert } from './services/tls-cert'
-import { createAuthMiddleware, loadOrCreateToken } from './services/auth'
+import { createAuthMiddleware, createTokenStore } from './services/auth'
 import { printPairingCode } from './services/pairing-qr'
 import { createPairRoutes } from './routes/pair'
 
@@ -40,15 +40,16 @@ const PORT = parseInt(process.env.PORT || '48085', 10)
 
 /** .vow/：TLS 证书与配对令牌的存放地（gitignored） */
 const vowDir = join(repoRoot, '.vow')
-const pairingToken = loadOrCreateToken(vowDir)
+const tokenStore = createTokenStore(vowDir)
+const pairingToken = tokenStore.token
 
 const app = new Hono()
 
 app.get('/api/health', (c) => c.json({ status: 'ok' })) // 探活——无泄密面，保持免鉴权
 
 // ⚠ 顺序即安全边界：/api/pair 必须在鉴权中间件【之前】注册（Hono 的 app.use 只作用于其后注册的路由）
-app.route('/api', createPairRoutes({ token: pairingToken }))
-app.use('/api/*', createAuthMiddleware(pairingToken))
+app.route('/api', createPairRoutes({ token: pairingToken, getToken: () => tokenStore.token }))
+app.use('/api/*', createAuthMiddleware(() => tokenStore.token))
 
 app.route('/api/sse', sseRoutes)
 app.route('/api/audio', audioRoutes)
@@ -136,6 +137,7 @@ const shutdown = async () => {
   // PortAudio worker 宽限（其内部另有 2s 上限），超时即强制退出
   await Promise.race([virtualAudio.stop(), new Promise((r) => setTimeout(r, 1500))])
   sseHub.stop()
+  tokenStore.close()
   process.exit(0)
 }
 process.on('SIGINT', () => { void shutdown() })

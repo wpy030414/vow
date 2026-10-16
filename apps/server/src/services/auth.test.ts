@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
-import { AUTH_COOKIE_NAME, createAuthMiddleware, loadOrCreateToken, tokenEquals } from './auth'
+import { AUTH_COOKIE_NAME, createAuthMiddleware, createTokenStore, loadOrCreateToken, tokenEquals } from './auth'
 import { createPairRoutes } from '../routes/pair'
 
 const TOKEN = 'test-token-0123456789abcdef'
@@ -49,7 +49,7 @@ describe('createAuthMiddleware（app 级顺序语义）', () => {
   function appWith(token: string) {
     const app = new Hono()
     app.get('/api/health', (c) => c.json({ status: 'ok' })) // 中间件之前注册 → 免鉴权
-    app.use('/api/*', createAuthMiddleware(token))
+    app.use('/api/*', createAuthMiddleware(() => token))
     app.get('/api/secret', (c) => c.json({ ok: true }))
     return app
   }
@@ -78,7 +78,7 @@ describe('createPairRoutes（与中间件的注册顺序语义）', () => {
     const app = new Hono()
     // 与 index.ts 相同的接线：pair 先注册（免鉴权），中间件其后
     app.route('/api', createPairRoutes({ token }))
-    app.use('/api/*', createAuthMiddleware(token))
+    app.use('/api/*', createAuthMiddleware(() => token))
     app.get('/api/secret', (c) => c.json({ ok: true }))
     return app
   }
@@ -125,5 +125,73 @@ describe('createPairRoutes（与中间件的注册顺序语义）', () => {
     const resp = await pair(app, TOKEN)
     const cookie = (resp.headers.get('Set-Cookie') ?? '').split(';')[0] // name=value
     expect((await app.request('/api/secret', { headers: { Cookie: cookie } })).status).toBe(200)
+  })
+})
+
+describe('createTokenStore（热加载：fs.watch 监听文件变化）', () => {
+  let dir: string
+  let file: string
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vow-auth-hot-'))
+    file = join(dir, 'pairing-token')
+  })
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+
+  it('初始读取文件令牌', () => {
+    writeFileSync(file, 'hot-token-init', 'utf-8')
+    const store = createTokenStore(dir)
+    expect(store.token).toBe('hot-token-init')
+    store.close()
+  })
+
+  it('文件变化后 token 返回新值', async () => {
+    writeFileSync(file, 'hot-token-v1', 'utf-8')
+    const store = createTokenStore(dir)
+    expect(store.token).toBe('hot-token-v1')
+
+    writeFileSync(file, 'hot-token-v2', 'utf-8')
+    for (let i = 0; i < 20 && store.token === 'hot-token-v1'; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(store.token).toBe('hot-token-v2')
+    store.close()
+  })
+
+  it('热加载后新令牌可配对，旧令牌 401（端到端）', async () => {
+    writeFileSync(file, 'hot-old', 'utf-8')
+    const store = createTokenStore(dir)
+
+    const app = new Hono()
+    app.route('/api', createPairRoutes({ token: store.token, getToken: () => store.token }))
+    app.use('/api/*', createAuthMiddleware(() => store.token))
+    app.get('/api/secret', (c) => c.json({ ok: true }))
+
+    // 旧令牌可通行
+    expect((await app.request('/api/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'hot-old' }),
+    })).status).toBe(200)
+
+    // 轮换
+    writeFileSync(file, 'hot-new', 'utf-8')
+    for (let i = 0; i < 20 && store.token === 'hot-old'; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(store.token).toBe('hot-new')
+
+    // 新令牌可配对
+    expect((await app.request('/api/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'hot-new' }),
+    })).status).toBe(200)
+
+    // 旧令牌已失效
+    expect((await app.request('/api/secret', {
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=hot-old` } },
+    )).status).toBe(401)
+
+    store.close()
   })
 })
