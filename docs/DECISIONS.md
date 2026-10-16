@@ -132,7 +132,7 @@
 ### A18：下行输出走扬声器——iOS AudioSession API + Android setSinkId
 
 **决策**：把手机端下行播放（宿主系统音频）从系统默认路由「听筒」扳回「扬声器」，新增 `apps/web/src/lib/audio-route.ts` 按平台能力各自兜底：
-- **iOS（Safari 16.4+）**：`navigator.audioSession.type`。录音中置 `'play-and-record'`（麦克风 + 扬声器），仅开输出置 `'playback'`（扬声器、高保真），两者皆否置 `'auto'`（交还浏览器）——由 `App` 的 effect 依据 `recording / isOutputEnabled` 实时同步。
+- **iOS（Safari 16.4+）**：`navigator.audioSession.type`。纯输出用 `'playback'`（扬声器、高保真、无通知栏指示器），录音中置 `'play-and-record'`（麦克风 + 扬声器）——由 `App` 的 effect 依据 `recording / isOutputEnabled` 实时同步。**关键时序修复**：`playback` 类别下 iOS 拒绝 `getUserMedia`（"AudioSession category is not compatible with audio capture"），故 `useMicrophone.startRecording` 在获取媒体之前**同步**将 category 置为 `'play-and-record'`（property setter 即时生效，不依赖 React effect 的异步渲染），停录后由 `App` effect 自动落回 `'playback'`——旁路掉类别升级被拒的 iOS 限制。
 - **Android（Chrome 110+）**：`AudioContext.setSinkId()`。枚举音频输出设备，仅当存在标签明确指向「扬声器」的设备时才切换；找不到则保持系统默认（绝不误切）。因设备标签经麦克风授权后才可见，授权瞬间额外触发一次重挑。
 
 **理由**：
@@ -140,4 +140,4 @@
 - iOS 侧唯一解是 AudioSession API（`navigator.audioSession`）：显式声明会话类型才能指定路由，输出设备枚举/`setSinkId` 在 iOS Safari 上均不可用（Apple 论坛 657321 确认）。
 - Android 侧 Chrome 支持 `AudioContext.setSinkId()`，但设备枚举粒度视机型而定：仅在标签可辨识扬声器时切换，保证不劣化为「意外端点」，不满足则等价空操作、保持默认。
 
-**代价**：iOS 需 16.4+（更早版本无 `navigator.audioSession`，输出在用过麦克风后仍走听筒，属网页技术不可解）；`'playback'` 语义为独占播放，启用输出期间会暂停其它 App 的播放类音频（对本应用「手机即监听音箱」的定位可接受）；Android 设备标签依赖麦克风授权且机型差异大，真机行为需实测，代码在无匹配设备时静默保持默认。
+**代价**：iOS 需 16.4+（更早版本无 `navigator.audioSession`，输出在用过麦克风后仍走听筒，属网页技术不可解）；Android 设备标签依赖麦克风授权且机型差异大，真机行为需实测，代码在无匹配设备时静默保持默认。

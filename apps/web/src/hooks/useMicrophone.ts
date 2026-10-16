@@ -13,6 +13,7 @@ import { DEFAULT_SAMPLE_RATE, CAPTURE_CHUNK_SAMPLES, AUDIO_CHANNELS } from '@vow
 // ?url&no-inline：强制产出外链资产文件——小文件（<4KB）默认会被 Vite 内联为
 // data: URL，而 data URL 形式的 worklet 跨浏览器不可靠（addModule 的兼容性坑）
 import micCaptureWorkletUrl from '../worklets/mic-capture-worklet.js?url&no-inline'
+import { setAudioSessionType } from '../lib/audio-route'
 
 type AudioDataCallback = (data: string, sampleRate: number, sequence: number) => void
 
@@ -97,6 +98,11 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
     const epoch = ++startEpochRef.current
 
     try {
+      // 0. 在 getUserMedia 之前同步切到 play-and-record——
+      //    syncAudioSession 跑在 React effect 中（异步于渲染），而 getUserMedia
+      //    在 startRecording 回调内同步调用；playback 类别下 iOS 拒绝音频采集。
+      setAudioSessionType('play-and-record')
+
       // 1. 获取麦克风权限
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {

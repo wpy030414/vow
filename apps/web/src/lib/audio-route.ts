@@ -35,7 +35,9 @@ export function setAudioSessionType(type: AudioSessionType): void {
 }
 
 /** 按「是否录音中 / 是否开启输出」的现状挑选 iOS 会话类型：
- *  录音 → 麦克风 + 扬声器；仅输出 → 扬声器（高保真）；都没有 → 交还浏览器。 */
+ *  输出开关开着时，优先 playback（无通知栏录音指示器，更优雅）；
+ *  一旦录音中则强制 play-and-record；
+ *  停录后若输出仍开着则落回 playback——不卡类别升级，通知栏干净。 */
 export function syncAudioSession(recording: boolean, outputEnabled: boolean): void {
   if (recording) setAudioSessionType('play-and-record')
   else if (outputEnabled) setAudioSessionType('playback')
