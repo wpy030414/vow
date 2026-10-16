@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSSE } from './hooks/useSSE'
 import { useMicrophone } from './hooks/useMicrophone'
 import { useAudioOutput } from './hooks/useAudioOutput'
+import { syncAudioSession } from './lib/audio-route'
 import { MicButton } from './components/MicButton'
 import { ControlBar } from './components/ControlBar'
 import { VolumeIndicator } from './components/VolumeIndicator'
@@ -36,7 +37,7 @@ export function App() {
   const [pairError, setPairError] = useState<string | null>(null)
 
   // Web Audio 输出播放器
-  const { play: playOutputAudio, unlock: unlockOutputAudio, setKeepAlive } = useAudioOutput()
+  const { play: playOutputAudio, unlock: unlockOutputAudio, setKeepAlive, refreshSink } = useAudioOutput()
 
   // output_audio 回调
   const onOutputAudio = useCallback((base64Data: string, sampleRate: number) => {
@@ -132,6 +133,17 @@ export function App() {
   useEffect(() => {
     setKeepAlive(recording || isOutputEnabled)
   }, [recording, isOutputEnabled, setKeepAlive])
+
+  // 输出路由：录音中 / 输出开启时把移动端音频会话切到扬声器（不切则一旦用过麦克风，
+  // 输出会被 iOS 锁在通话模式的「听筒」上）；两者皆否时交还浏览器自动判定
+  useEffect(() => {
+    syncAudioSession(recording, isOutputEnabled)
+  }, [recording, isOutputEnabled])
+
+  // 麦克风授权后设备标签才可见——授权瞬间重挑一次扬声器输出设备（Android setSinkId）
+  useEffect(() => {
+    if (recording) refreshSink()
+  }, [recording, refreshSink])
 
   // 录音状态变化 → 同步服务端（听写联动：仅 hold 模式 + 「转文字」开启 + 录音中激活）
   useEffect(() => {

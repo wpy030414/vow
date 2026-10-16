@@ -2,6 +2,7 @@
 
 import { useRef, useCallback, useEffect } from 'react'
 import { LOOPBACK_SAMPLE_RATE } from '@vow/shared/constants'
+import { preferLoudspeakerSink } from '../lib/audio-route'
 
 /** 预滚缓冲（秒）：新 chunk 到达时至少推迟这么多再播，吸收网络抖动 */
 const PREROLL_S = 0.08
@@ -28,6 +29,8 @@ interface AudioOutputReturn {
   unlock: () => void
   /** 后台保活开关：true 期间维持一个静默循环音源（见 applyKeepAlive 注释），页面豁免后台冻结 */
   setKeepAlive: (on: boolean) => void
+  /** 重新挑选输出设备（扬声器）——麦克风授权后设备标签才可见，此时需再挑一次 */
+  refreshSink: () => void
 }
 
 export function useAudioOutput(): AudioOutputReturn {
@@ -37,8 +40,16 @@ export function useAudioOutput(): AudioOutputReturn {
   const ensureCtx = useCallback((sampleRate?: number): AudioContext => {
     if (!ctxRef.current) {
       ctxRef.current = new AudioContext({ sampleRate: sampleRate ?? LOOPBACK_SAMPLE_RATE })
+      // 尽量把输出钉到扬声器（Android setSinkId 分支；iOS 由 audioSession 分支负责）
+      void preferLoudspeakerSink(ctxRef.current)
     }
     return ctxRef.current
+  }, [])
+
+  /** 设备标签在麦克风授权后才可见——授权后重挑一次扬声器（Android） */
+  const refreshSink = useCallback(() => {
+    const ctx = ctxRef.current
+    if (ctx) void preferLoudspeakerSink(ctx)
   }, [])
 
   // ─── 后台保活 ───
@@ -144,5 +155,5 @@ export function useAudioOutput(): AudioOutputReturn {
     nextTimeRef.current += frames / sampleRate
   }, [ensureCtx])
 
-  return { play, unlock, setKeepAlive }
+  return { play, unlock, setKeepAlive, refreshSink }
 }

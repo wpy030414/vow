@@ -35,8 +35,12 @@
 
 ```
 系统音频输出 → 虚拟音频输出设备缓冲区 → Hono Server
-  → SSE push → 手机 Web Audio API → AudioContext → 手机扬声器
+  → SSE push → 手机 Web Audio API → AudioContext
+  → 输出路由（iOS: navigator.audioSession / Android: setSinkId）→ 手机扬声器
 ```
+
+> 输出路由见 A18：移动端一旦用过麦克风，系统音频会话会被切入录放类别而把外放锁到「听筒」，
+> 故下行播放需显式声明扬声器路由。
 
 ### 听写联动链路（可选：Hold + 「转文字」）
 

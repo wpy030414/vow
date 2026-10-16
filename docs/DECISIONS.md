@@ -128,3 +128,16 @@
 - 「close 即销毁」原本是为堵内存泄漏（客户端离开后 `writer.write()` 不报错 → 死会话被持续灌入音频），但解绑 writer 已同样达到目的：心跳与输出广播都按 `writer` 存在性跳过；真正离线的会话由 `reapStaleSessions` 在 TTL 后清掉并按既有逻辑释放听写。
 - 客户端并发 `connect()` 各建一个会话是 active 累积成 3 的另一半原因（自动连接 / ping-404 恢复 / 配对重试多路径），互斥旗标封死。
 **代价**：关闭标签页后会话最多多存活一个 TTL（90s）才被回收（期间无内存增长，仅 `connectedCount` 短暂偏大）；瞬时断连不再立刻释放听写（改为 TTL 兜底，避免重连抖动误掐进行中的听写）。
+
+### A18：下行输出走扬声器——iOS AudioSession API + Android setSinkId
+
+**决策**：把手机端下行播放（宿主系统音频）从系统默认路由「听筒」扳回「扬声器」，新增 `apps/web/src/lib/audio-route.ts` 按平台能力各自兜底：
+- **iOS（Safari 16.4+）**：`navigator.audioSession.type`。录音中置 `'play-and-record'`（麦克风 + 扬声器），仅开输出置 `'playback'`（扬声器、高保真），两者皆否置 `'auto'`（交还浏览器）——由 `App` 的 effect 依据 `recording / isOutputEnabled` 实时同步。
+- **Android（Chrome 110+）**：`AudioContext.setSinkId()`。枚举音频输出设备，仅当存在标签明确指向「扬声器」的设备时才切换；找不到则保持系统默认（绝不误切）。因设备标签经麦克风授权后才可见，授权瞬间额外触发一次重挑。
+
+**理由**：
+- 移动浏览器上页面一旦调用 `getUserMedia` 取得麦克风，系统音频会话即被切入「录放 / 通话」类别，此后**所有外放**（含本应用 Web Audio 播出的宿主系统音频）都被路由到听筒；即便停止录音，会话也常赖在录放态不归还（WebKit bug 295889 / Apple 论坛 657321 均记录此行为）——正是用户报告的现象。
+- iOS 侧唯一解是 AudioSession API（`navigator.audioSession`）：显式声明会话类型才能指定路由，输出设备枚举/`setSinkId` 在 iOS Safari 上均不可用（Apple 论坛 657321 确认）。
+- Android 侧 Chrome 支持 `AudioContext.setSinkId()`，但设备枚举粒度视机型而定：仅在标签可辨识扬声器时切换，保证不劣化为「意外端点」，不满足则等价空操作、保持默认。
+
+**代价**：iOS 需 16.4+（更早版本无 `navigator.audioSession`，输出在用过麦克风后仍走听筒，属网页技术不可解）；`'playback'` 语义为独占播放，启用输出期间会暂停其它 App 的播放类音频（对本应用「手机即监听音箱」的定位可接受）；Android 设备标签依赖麦克风授权且机型差异大，真机行为需实测，代码在无匹配设备时静默保持默认。
