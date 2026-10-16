@@ -30,6 +30,10 @@ export class SSEHub {
   /** 听写联动回调——某会话的听写态翻转时触发；会话销毁时若听写仍开着则强制释放 */
   onDictationChange: ((active: boolean, sessionId: string, reason: 'toggle' | 'release') => void) | null = null
 
+  /** 会话初始化钩子——每次会话就绪（新建或复活）时调用，用于挂载 onAudioChunk 等外部接线。
+   *  比在此猴补丁 createSession 更稳：复活路径同样接线（否则复活的会话收不到上行音频）。 */
+  onSessionInit: ((session: SSESession) => void) | null = null
+
   // ─── 生命周期 ───
 
   start() {
@@ -50,11 +54,18 @@ export class SSEHub {
 
   // ─── 会话管理 ───
 
-  createSession(deviceName?: string, mode: RecordMode = 'tap'): SSESession {
+  createSession(_deviceName?: string, mode: RecordMode = 'tap'): SSESession {
     // 随机不可猜：会话 ID 在重连复活路径中兼作凭据（app 层另有配对鉴权，此处防跨会话互串）
-    const id = `vow-${randomUUID()}`
+    const session = this.makeSession(`vow-${randomUUID()}`, mode)
+    this.registerSession(session)
+    console.log(`[SSE Hub] session created: ${session.id} (${this.sessions.size} active)`)
+    return session
+  }
+
+  /** 构造会话对象（不含注册/接线/日志）——新建与复活共用同一形状 */
+  private makeSession(id: string, mode: RecordMode): SSESession {
     const now = Date.now()
-    const session: SSESession = {
+    return {
       id,
       createdAt: now,
       lastHeartbeat: now,
@@ -71,10 +82,14 @@ export class SSEHub {
       onAudioChunk: null,
       onOutputAudio: null,
     }
-    this.sessions.set(id, session)
-    console.log(`[SSE Hub] session created: ${id} (${this.sessions.size} active)`)
-    return session
   }
+
+  /** 注册进会话表并触发初始化接线（onAudioChunk 等） */
+  private registerSession(session: SSESession): void {
+    this.sessions.set(session.id, session)
+    this.onSessionInit?.(session)
+  }
+
 
   destroySession(id: string) {
     const session = this.sessions.get(id)
@@ -114,11 +129,12 @@ export class SSEHub {
   getOrCreateStream(sessionId: string): { session: SSESession; stream: ReadableStream } {
     let session = this.sessions.get(sessionId)
     if (!session) {
-      session = this.createSession()
-      // 覆盖自动 ID 为客户端传入的
-      this.sessions.delete(session.id)
-      session.id = sessionId
-      this.sessions.set(sessionId, session)
+      // 复活：EventSource 断线自动重连会携带原 sessionId，而服务端可能已重启（内存会话表
+      // 清空）或该会话已被 TTL 回收——**按原 id 重建**（此前误用 createSession 生成随机
+      // id 再改写，会在每次重连上多记一条假 "session created"，是刷屏的根源）
+      session = this.makeSession(sessionId, 'tap')
+      this.registerSession(session)
+      console.log(`[SSE Hub] session resumed: ${sessionId} (${this.sessions.size} active)`)
     }
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
@@ -131,6 +147,28 @@ export class SSEHub {
     void this.sendEvent(writer, event)
 
     return { session, stream: readable }
+  }
+
+  /**
+   * 传输层断开：仅**解绑**该连接的 writer 与输出回调，**不销毁会话**。
+   *
+   * 会话的语义是「客户端逻辑连接」（由 POST /session 建立、由保活 ping 续命、由 TTL 回收），
+   * SSE 流只是它的传输载体——EventSource 会自动重连并复用同一 sessionId。若在流 close 时
+   * 销毁会话，每次瞬时断连都会上演「销毁 → 重连复活」的刷屏，并丢失会话状态
+   * （mode / isOutputEnabled / recording）。
+   *
+   * 解绑后 writer 为空 → 心跳/输出广播自动跳过，不再有「死会话被灌音频」的内存增长；
+   * 真正离线的会话由 reapStaleSessions 在 TTL 后清掉（届时按既有逻辑释放听写）。
+   *
+   * 仅当断开的连接仍是当前连接时才解绑——EventSource 可能在旧连接的 close 事件到达前
+   * 就已建好新连接，此时不能误清新连接的 writer。
+   */
+  detachStream(id: string, writer: WritableStreamDefaultWriter<Uint8Array> | null): void {
+    const session = this.sessions.get(id)
+    if (!session || session.writer !== writer) return
+    session.writer = null
+    session.onOutputAudio = null
+    session.lastHeartbeat = Date.now()
   }
 
   // ─── 状态更新 ───

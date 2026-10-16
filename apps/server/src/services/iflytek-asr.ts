@@ -72,7 +72,7 @@ export function float32ToPcm16Base64(samples: Float32Array): string {
   return buf.toString('base64')
 }
 
-/** 线性插值重采样到 16000Hz（与 virtual-audio 的 resampleTo44k 同法） */
+/** 线性插值重采样到 16000Hz（与 virtual-audio 的 resample 同法） */
 export function resampleTo16k(input: Float32Array, inRate: number): Float32Array {
   if (inRate === 16000 || input.length === 0) return input
   const ratio = inRate / 16000

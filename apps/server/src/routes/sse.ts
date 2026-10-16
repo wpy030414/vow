@@ -34,25 +34,28 @@ sseRoutes.get('/stream', async (c) => {
     return c.json({ error: 'Missing sessionId query parameter' }, 400)
   }
   // 注意：不做 404 预检查——客户端 EventSource 断线自动重连时携带原 sessionId，
-  // 会话可能已被断连检测销毁，getOrCreateStream 会将其复活（重建 writer）
+  // 会话可能已被 TTL 回收，getOrCreateStream 会按原 id 复活（重建 writer）
 
   const { session, stream } = sseHub.getOrCreateStream(sessionId)
 
-  // 断连检测：@hono/node-server 不向 TransformStream 传播取消，
-  // writer.write() 在客户端离开后不会失败，心跳清理永远不触发 → 会话泄漏
-  // （开着输出的死会话每秒被灌入约 1MB 的音频事件，内存无限增长）。
-  // 改为监听底层 HTTP 响应的 close 事件，连接一断立即销毁会话。
+  // 断连检测：@hono/node-server 不向 TransformStream 传播取消，writer.write() 在客户端
+  // 离开后不会失败 → 心跳清理永不触发，开着输出的死会话会被持续灌入音频导致内存增长。
+  // 故监听底层 HTTP 响应的 close 事件。但**只解绑本连接的 writer，不销毁会话**：
+  // 会话是逻辑连接（EventSource 会自动重连并复用同一 sessionId），流 close 时销毁会话
+  // 会让每次瞬时断连演变成「销毁→复活」刷屏并丢状态；真正离线的会话由 TTL 兜底回收。
+  // 捕获本连接的 writer 作身份凭据——旧连接的 close 可能晚于新连接建立，不可误清新 writer。
+  const myWriter = session.writer
   const nodeEnv = c.env as Partial<{ incoming: IncomingMessage; outgoing: ServerResponse }>
-  const closeOnce = (() => {
+  const detachOnce = (() => {
     let fired = false
     return () => {
       if (fired) return
       fired = true
-      sseHub.destroySession(sessionId)
+      sseHub.detachStream(sessionId, myWriter)
     }
   })()
-  nodeEnv.outgoing?.on('close', closeOnce)
-  nodeEnv.incoming?.on('close', closeOnce)
+  nodeEnv.outgoing?.on('close', detachOnce)
+  nodeEnv.incoming?.on('close', detachOnce)
 
   // 注册输出音频回调：系统音频 → SSE push 给手机
   session.onOutputAudio = (audioData: ArrayBuffer) => {

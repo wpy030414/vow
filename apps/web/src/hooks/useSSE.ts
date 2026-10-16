@@ -35,6 +35,8 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
   const [lastEvent, setLastEvent] = useState<ServerEvent | null>(null)
 
   const eventSourceRef = useRef<EventSource | null>(null)
+  /** connect 互斥旗标——防止并发 connect 各建一个会话 */
+  const connectingRef = useRef(false)
   const onOutputAudioRef = useRef(onOutputAudio)
   onOutputAudioRef.current = onOutputAudio
 
@@ -53,6 +55,13 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
   }, [cleanupStream])
 
   const connect = useCallback(async () => {
+    // 互斥：connect 可能被自动连接、ping-404 恢复、配对重试等多路径并发触发——
+    // 无锁会各自 POST /session 建出多个会话（泄漏成多个 active）
+    if (connectingRef.current) return
+    connectingRef.current = true
+    // 先关闭上一次的 EventSource：否则它会带旧 sessionId 持续自动重连，
+    // 在服务端复活出僵尸会话（新会话之外多出一条 active）
+    cleanupStream()
     setConnecting(true)
     try {
       const body: ConnectRequest = { deviceName, mode }
@@ -106,8 +115,12 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
     } catch (err) {
       console.error('[useSSE] connect error:', err)
       setConnecting(false)
+    } finally {
+      // 旗标只覆盖「建会话 + 建流」这段窗口；流建立后立即释放，
+      // 否则后续 ping-404 恢复路径会被永久挡住
+      connectingRef.current = false
     }
-  }, [deviceName, mode])
+  }, [deviceName, mode, cleanupStream])
 
   const uploadAudio = useCallback(async (data: string, sampleRate: number, sequence: number) => {
     if (!sessionId) throw new Error('No session')

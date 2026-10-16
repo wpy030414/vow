@@ -7,9 +7,38 @@ import { INPUT_RING_BUFFER_SAMPLES, VB_CABLE_KEYWORD } from '@vow/shared/constan
 import { getPortAudio } from '@vow/portaudio'
 import type { PortAudioApi, PortAudioDevice, PortAudioOutputStream } from '@vow/portaudio'
 
-// 固定输出格式：手机实际采样率常为 48000，而虚拟声卡链路固定 44100 —— 由 resampleTo44k 负责对齐
-const OUTPUT_SAMPLE_RATE = 44100
+// 输出端点采样率**不可硬编码**：WASAPI 共享模式要求 Pa_OpenStream 的 sampleRate
+// 与端点混音格式（PortAudio 上报的 device.defaultSampleRate）完全一致，否则
+// 直接失败 "Invalid sample rate"（实测本机 CABLE Input 端点混音格式为 48000Hz，
+// 而历史代码写死 44100 → 虚拟麦克风永远开不了流）。
+// 运行时由设备 defaultSampleRate 决定；此常量仅作设备未上报采样率时的兜底。
+const FALLBACK_SAMPLE_RATE = 44100
 const OUTPUT_CHANNELS = 2
+/** 设备采样率打开失败时的降级候选（设备上报值不可信时依次尝试） */
+const RATE_FALLBACKS = [48000, 44100]
+
+/** 设备未上报 / 上报非法采样率时回退兜底值 */
+function normalizeRate(rate: number | undefined): number {
+  return typeof rate === 'number' && Number.isFinite(rate) && rate > 0 ? rate : FALLBACK_SAMPLE_RATE
+}
+
+/** 去重并剔除非法值，保持给定优先级（队首优先） */
+function dedupeRates(rates: number[]): number[] {
+  const seen = new Set<number>()
+  const out: number[] = []
+  for (const r of rates) {
+    if (Number.isFinite(r) && r > 0 && !seen.has(r)) {
+      seen.add(r)
+      out.push(r)
+    }
+  }
+  return out
+}
+
+/** PortAudio 的 paInvalidSampleRate 文本为 "Invalid sample rate"——据此判定是否值得换率重试 */
+function isSampleRateError(err: unknown): boolean {
+  return /sample rate/i.test(err instanceof Error ? err.message : String(err))
+}
 
 // 内联类型：loopback-capture 相关
 interface LoopbackCaptureInstance {
@@ -39,20 +68,35 @@ function lcCtor(): new () => LoopbackCaptureInstance {
 
 // ─── 设备选择（纯函数，供单测直测）───
 
-/** 扫描 VB-Cable 渲染端点。
- *  必须至少 2 个输出声道——写入的是交错立体声，单声道端点会损坏音频
- *  （实测 "CABLE Input" 端点无双通道不可用，"CABLE In 16ch" 才有）。
- *  多候选时优先恰好 2 声道的端点，其次取声道数最接近 2 的。 */
-export function selectCableDevice(devices: PortAudioDevice[]): PortAudioDevice | null {
-  const candidates = devices.filter(
-    (d) =>
-      d.name.toUpperCase().includes(VB_CABLE_KEYWORD) &&
-      d.maxOutputChannels >= 2 &&
-      d.hostAPIName === 'Windows WASAPI',
-  )
-  if (candidates.length === 0) return null
-  candidates.sort((a, b) => Math.abs(a.maxOutputChannels - 2) - Math.abs(b.maxOutputChannels - 2))
-  return candidates[0]
+/** 实测可用的多声道渲染端点命名特征：VB-Cable 的 16ch 端点开流稳定，
+ *  而同名的 plain "CABLE Input" 在 WASAPI 上恒报 Invalid device（元数据无法区分——
+ *  两者都上报 2 声道 / 48000Hz），只能靠名字偏好 + 开流逐一尝试兜底。 */
+const CABLE_MULTICH_SUFFIX = '16ch'
+
+/**
+ * 扫描 VB-Cable 渲染端点，返回**按开流成功率启发排序的候选列表**（最佳在前），
+ * 调用方须依次尝试直到某一候选开流成功。
+ *
+ * 排序（仅影响首次开流的尝试顺序，不影响正确性——真正的判据是开流是否成功）：
+ *   1. WASAPI 优先（共享模式低延迟；MME/DirectSound 仅作最后兜底）
+ *   2. "16ch" 端点优先（已知可用；plain "CABLE Input" 元数据等价但开流失败）
+ *   3. 输出声道数越接近 2 越省（写入的是交错立体声）
+ *
+ * 必须至少 2 个输出声道——写入的是交错立体声，单声道端点会损坏音频。
+ */
+export function selectCableDevices(devices: PortAudioDevice[]): PortAudioDevice[] {
+  return devices
+    .filter((d) => d.name.toUpperCase().includes(VB_CABLE_KEYWORD) && d.maxOutputChannels >= 2)
+    .sort((a, b) => cableRank(a) - cableRank(b))
+}
+
+/** 越小越优先 */
+function cableRank(d: PortAudioDevice): number {
+  let rank = 0
+  if (d.hostAPIName !== 'Windows WASAPI') rank += 1000
+  if (!d.name.toLowerCase().includes(CABLE_MULTICH_SUFFIX)) rank += 100
+  rank += Math.abs(d.maxOutputChannels - 2)
+  return rank
 }
 
 // ─── 环形缓冲 ───
@@ -122,6 +166,8 @@ function base64ToFloat32(base64: string): Float32Array {
 export class VirtualAudioManager {
   private inputDeviceId: number | null = null
   private inputDeviceName: string | null = null
+  /** 目标端点采样率（由设备 defaultSampleRate 决定；writeInputPCM 据此重采样） */
+  private inputSampleRate = FALLBACK_SAMPLE_RATE
   private outputDeviceId: number | null = null
   private inputActive = false
   private outputActive = false
@@ -134,6 +180,8 @@ export class VirtualAudioManager {
   private outputCallback: ((buf: Buffer) => void) | null = null
   /** 上次输入流打开失败的时间戳——失败后 1s 内不重试，防止按 chunk 刷屏 */
   private lastInputFailAt = 0
+  /** 候选渲染端点（按可用性启发排序）——start() 时扫描一次，开流时逐一尝试 */
+  private cableCandidates: PortAudioDevice[] = []
 
   /** @param pa 注入 PortAudio 实现（默认进程内单例；测试注入替身） */
   constructor(private readonly pa: PortAudioApi = getPortAudio()) {}
@@ -162,11 +210,15 @@ export class VirtualAudioManager {
       console.warn('[VirtualAudio] device scan failed:', err instanceof Error ? err.message : err)
     }
 
-    const dev = selectCableDevice(devices)
+    this.cableCandidates = selectCableDevices(devices)
+    const dev = this.cableCandidates[0]
     if (dev) {
       this.inputDeviceId = dev.id
       this.inputDeviceName = dev.name
-      console.log(`[VirtualAudio] Virtual input: "${dev.name}" (id=${dev.id})`)
+      this.inputSampleRate = normalizeRate(dev.defaultSampleRate)
+      console.log(
+        `[VirtualAudio] Virtual input candidates: ${this.cableCandidates.map((d) => `#${d.id} "${d.name}"`).join(' | ')}`,
+      )
     } else {
       console.warn('[VirtualAudio] VB-Cable not found — virtual mic unavailable')
       console.warn('[VirtualAudio] run: pnpm -w run get-driver (as Administrator)')
@@ -200,9 +252,9 @@ export class VirtualAudioManager {
     if (!this.inputDeviceId) return
     const float32 = base64ToFloat32(data.data)
     if (float32.length === 0) return
-    // 手机实际采样率常为 48000，而输出链路固定 44100 —— 必须重采样，
-    // 否则麦克风声音会被拉慢约 8.8% 并降调
-    const resampled = this.resampleTo44k(float32, data.sampleRate || OUTPUT_SAMPLE_RATE)
+    // 手机实际采样率常为 48000，端点采样率由设备决定（多见 48000，亦可能 44100）——
+    // 二者不一致时必须重采样，否则麦克风声音会被拉慢/降调
+    const resampled = this.resample(float32, data.sampleRate || this.inputSampleRate, this.inputSampleRate)
     this.ringBuffer.write(resampled)
     // 失败退避：上次打开失败 1s 内不重试（否则每个音频块都会刷一条错误）
     if (
@@ -215,10 +267,10 @@ export class VirtualAudioManager {
     }
   }
 
-  /** 线性插值重采样 → 44100Hz */
-  private resampleTo44k(input: Float32Array, from: number): Float32Array {
-    if (from === OUTPUT_SAMPLE_RATE || input.length === 0) return input
-    const ratio = from / OUTPUT_SAMPLE_RATE
+  /** 线性插值重采样 from→to（from==to 或空输入直接返回原数组） */
+  private resample(input: Float32Array, from: number, to: number): Float32Array {
+    if (from === to || input.length === 0) return input
+    const ratio = from / to
     const outLen = Math.max(1, Math.floor(input.length / ratio))
     const out = new Float32Array(outLen)
     for (let i = 0; i < outLen; i++) {
@@ -236,21 +288,17 @@ export class VirtualAudioManager {
     if (this.inputDeviceId === null || this.inputActive || this.inputOpening) return
     this.inputOpening = true
     try {
-      if (await this.openInputStream()) return
+      const tried = new Set<number>()
+      const candidates = this.cableCandidates.length > 0 ? this.cableCandidates : await this.rescanCandidates()
+      if (await this.openInputStream(candidates, tried)) return
 
       // 打开失败：PortAudio 的设备枚举可能已漂移（tsx watch 硬杀进程后
-      // WASAPI 端点会重枚举，缓存的 id 失效报 "Invalid device"）——重扫重试一次
-      let dev: PortAudioDevice | null = null
-      try {
-        dev = selectCableDevice(await this.pa.getDevices())
-      } catch (err) {
-        console.warn('[VirtualAudio] device rescan failed:', err instanceof Error ? err.message : err)
-      }
-      if (dev && dev.id !== this.inputDeviceId) {
-        console.warn(`[VirtualAudio] device drift: #${this.inputDeviceId} -> #${dev.id} ("${dev.name}") — retrying`)
-        this.inputDeviceId = dev.id
-        this.inputDeviceName = dev.name
-        if (await this.openInputStream()) return
+      // WASAPI 端点会重枚举，缓存的 id 失效报 "Invalid device"）——重扫一次，
+      // 只试尚未试过的 id（同 id 重试无意义，只会刷屏）
+      const fresh = (await this.rescanCandidates()).filter((d) => !tried.has(d.id))
+      if (fresh.length > 0) {
+        console.warn(`[VirtualAudio] device rescan → 新候选: ${fresh.map((d) => `#${d.id} "${d.name}"`).join(', ')}`)
+        if (await this.openInputStream(fresh, tried)) return
       }
       // 仍失败：记录退避时间戳，1s 后才允许再次尝试
       this.lastInputFailAt = Date.now()
@@ -259,62 +307,97 @@ export class VirtualAudioManager {
     }
   }
 
-  private async openInputStream(): Promise<boolean> {
-    if (this.inputDeviceId === null) return false
-
+  /** 重扫 VB-Cable 候选端点（枚举失败返回空列表，不抛） */
+  private async rescanCandidates(): Promise<PortAudioDevice[]> {
     try {
-      const stream = await this.pa.openOutput({
-        deviceId: this.inputDeviceId,
-        sampleRate: OUTPUT_SAMPLE_RATE,
-        channelCount: OUTPUT_CHANNELS,
-      })
-
-      this.inputStream = stream
-
-      // 必须注册 error 回调——流出错时释放并进入退避（原 naudiodon closeOnError 语义）
-      stream.onError((err) => {
-        console.error('[VirtualAudio] input stream error:', err.message)
-        this.stopInput()
-        this.lastInputFailAt = Date.now()
-      })
-
-      this.inputActive = true
-
-      // 定时推送：每 ~23ms 从环形缓冲取 1024 个单声道样本（1024/44100 ≈ 23.2ms，
-      // 与手机音频产率 44100 samples/s 匹配），复制为 2048 帧交错立体声写入声卡。
-      // 注意：输出链路是 2ch interleaved，若直接写单声道样本会被当作 L/R 交错导致音频损坏
-      const MONO_CHUNK = 1024
-      let idleTicks = 0
-      this.inputTimer = setInterval(() => {
-        if (!this.inputActive || !this.inputStream) return
-        const mono = new Float32Array(MONO_CHUNK)
-        const read = this.ringBuffer.read(mono)
-        // 未读满的用静音填充
-        for (let i = read; i < MONO_CHUNK; i++) mono[i] = 0
-        const stereo = new Float32Array(MONO_CHUNK * 2)
-        for (let i = 0; i < MONO_CHUNK; i++) {
-          stereo[i * 2] = mono[i]
-          stereo[i * 2 + 1] = mono[i]
-        }
-        try {
-          this.inputStream.write(stereo)
-        } catch { /* stream closed */ }
-        // 空闲检测：连续 ~60 tick（约 1.4s）无新数据则关闭设备，
-        // 释放 CABLE（否则虚拟麦克风永远显示"使用中"）；新数据到达会自动重启
-        idleTicks = read < MONO_CHUNK / 4 ? idleTicks + 1 : 0
-        if (idleTicks > 60) {
-          console.log('[VirtualAudio] input idle — releasing VB-Cable device')
-          this.stopInput()
-        }
-      }, 23)
-
-      console.log('[VirtualAudio] input stream -> VB-Cable (44100Hz float32 stereo, 23ms timer)')
-      return true
+      return selectCableDevices(await this.pa.getDevices())
     } catch (err) {
-      console.error('[VirtualAudio] input open failed:', err instanceof Error ? err.message : err)
-      this.lastInputFailAt = Date.now()
-      return false
+      console.warn('[VirtualAudio] device rescan failed:', err instanceof Error ? err.message : err)
+      return []
     }
+  }
+
+  /**
+   * 依次尝试「设备 × 采样率」组合开流，首个成功者生效并启动推送定时器。
+   * - 采样率被拒（paInvalidSampleRate）→ 该设备换下一个候选采样率
+   * - 其他错误（paInvalidDevice / 设备占用）→ 换下一个候选设备
+   * 这是元数据无法区分可用端点时的真正判据（见 selectCableDevices 注释）。
+   */
+  private async openInputStream(candidates: PortAudioDevice[], tried: Set<number>): Promise<boolean> {
+    let lastErr: unknown = null
+    for (const dev of candidates) {
+      tried.add(dev.id)
+      for (const rate of dedupeRates([normalizeRate(dev.defaultSampleRate), ...RATE_FALLBACKS])) {
+        try {
+          const stream = await this.pa.openOutput({
+            deviceId: dev.id,
+            sampleRate: rate,
+            channelCount: OUTPUT_CHANNELS,
+          })
+
+          this.inputDeviceId = dev.id
+          this.inputDeviceName = dev.name
+          this.inputSampleRate = rate
+          this.inputStream = stream
+
+          // 必须注册 error 回调——流出错时释放并进入退避（原 naudiodon closeOnError 语义）
+          stream.onError((err) => {
+            console.error('[VirtualAudio] input stream error:', err.message)
+            this.stopInput()
+            this.lastInputFailAt = Date.now()
+          })
+
+          this.inputActive = true
+          const intervalMs = this.startInputTimer(rate)
+          console.log(`[VirtualAudio] input stream -> "${dev.name}" (id=${dev.id}, ${rate}Hz float32 stereo, ${intervalMs}ms timer)`)
+          return true
+        } catch (err) {
+          lastErr = err
+          if (!isSampleRateError(err)) break // 非采样率错误：该设备换率无意义 → 下一候选设备
+          console.warn(`[VirtualAudio] "${dev.name}" 拒绝 ${rate}Hz — 尝试降级采样率`)
+        }
+      }
+    }
+
+    console.error(
+      '[VirtualAudio] input open failed:',
+      `候选端点 [${candidates.map((d) => `#${d.id} "${d.name}"`).join(', ')}] 均无法开流 —`,
+      lastErr instanceof Error ? lastErr.message : String(lastErr),
+    )
+    this.lastInputFailAt = Date.now()
+    return false
+  }
+
+  /** 启动推送定时器：每 1024/rate 秒从环形缓冲取 1024 个端点采样率样本，
+   *  复制为 2048 帧交错立体声写入声卡。返回节拍毫秒数（供日志）。
+   *  注意：输出链路是 2ch interleaved，若直接写单声道样本会被当作 L/R 交错导致音频损坏 */
+  private startInputTimer(rate: number): number {
+    const MONO_CHUNK = 1024
+    const intervalMs = Math.round((MONO_CHUNK / rate) * 1000)
+    let idleTicks = 0
+    this.inputTimer = setInterval(() => {
+      if (!this.inputActive || !this.inputStream) return
+      const mono = new Float32Array(MONO_CHUNK)
+      const read = this.ringBuffer.read(mono)
+      // 未读满的用静音填充
+      for (let i = read; i < MONO_CHUNK; i++) mono[i] = 0
+      const stereo = new Float32Array(MONO_CHUNK * 2)
+      for (let i = 0; i < MONO_CHUNK; i++) {
+        stereo[i * 2] = mono[i]
+        stereo[i * 2 + 1] = mono[i]
+      }
+      try {
+        this.inputStream.write(stereo)
+      } catch { /* stream closed */ }
+      // 空闲检测：连续 ~60 tick（约 1.4s）无新数据则关闭设备，
+      // 释放 CABLE（否则虚拟麦克风永远显示"使用中"）；新数据到达会自动重启
+      idleTicks = read < MONO_CHUNK / 4 ? idleTicks + 1 : 0
+      if (idleTicks > 60) {
+        console.log('[VirtualAudio] input idle — releasing VB-Cable device')
+        this.stopInput()
+      }
+    }, intervalMs)
+    return intervalMs
   }
 
   private stopInput(): void {

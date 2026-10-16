@@ -64,7 +64,7 @@ export const AUDIO_OUTPUT_PATH = '/api/audio/output'
 
 // ─── 虚拟音频参数 ───
 
-/** 输入环形缓冲大小（样本数，200ms @ 44100Hz） */
+/** 输入环形缓冲大小（样本数，约 200ms）——样本以端点采样率计（44100/48000 通用） */
 export const INPUT_RING_BUFFER_SAMPLES = 8820
 
 /** 输出块大小（PortAudio 写入块） */

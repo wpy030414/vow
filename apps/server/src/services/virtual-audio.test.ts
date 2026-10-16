@@ -1,6 +1,6 @@
 // virtual-audio 服务测试：替身 PortAudioApi + fake timers（零 vi.mock，沿用仓库惯例）
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { VirtualAudioManager, selectCableDevice } from './virtual-audio'
+import { VirtualAudioManager, selectCableDevices } from './virtual-audio'
 import type { PortAudioApi, PortAudioDevice, PortAudioOutputStream } from '@vow/portaudio'
 
 const SR = 44100
@@ -94,21 +94,35 @@ async function openStream(f: Fake, samples = 1200): Promise<VirtualAudioManager>
   return mgr
 }
 
-describe('selectCableDevice', () => {
-  it('优先恰好 2 声道的 WASAPI CABLE 端点', () => {
-    const picked = selectCableDevice([
+describe('selectCableDevices', () => {
+  it('WASAPI + "16ch" + 恰好 2 声道 三重加权排序', () => {
+    const picked = selectCableDevices([
       device(1, { maxOutputChannels: 16 }),
       device(2, { maxOutputChannels: 2 }),
       device(3, { maxOutputChannels: 8 }),
     ])
-    expect(picked?.id).toBe(2)
+    expect(picked.map((d) => d.id)).toEqual([2, 3, 1]) // 均 WASAPI+16ch，按 |out-2| 升序
   })
 
-  it('排除非 WASAPI / 单声道 / 非 CABLE；空列表返回 null', () => {
-    expect(selectCableDevice([device(1, { hostAPIName: 'MME' })])).toBeNull()
-    expect(selectCableDevice([device(1, { maxOutputChannels: 1 })])).toBeNull()
-    expect(selectCableDevice([device(1, { name: 'Speakers' })])).toBeNull()
-    expect(selectCableDevice([])).toBeNull()
+  it('WASAPI 优先于 MME/DirectSound（后者仅作兜底，排在队尾）', () => {
+    const picked = selectCableDevices([
+      device(1, { hostAPIName: 'MME', maxOutputChannels: 2 }),
+      device(2, { hostAPIName: 'Windows WASAPI', maxOutputChannels: 16 }),
+    ])
+    expect(picked.map((d) => d.id)).toEqual([2, 1])
+  })
+
+  it('"16ch" 端点优先于同元数据的 plain "CABLE Input"（后者 WASAPI 开流恒失败）', () => {
+    // 两者都上报 2 声道 / 48000Hz，元数据无法区分——只有名字可分
+    const plain = device(16, { name: 'CABLE Input (VB-Audio Virtual Cable)', maxOutputChannels: 2 })
+    const multich = device(19, { name: 'CABLE In 16ch (VB-Audio Virtual Cable)', maxOutputChannels: 4 })
+    expect(selectCableDevices([plain, multich]).map((d) => d.id)).toEqual([19, 16])
+  })
+
+  it('剔除单声道 / 非 CABLE 端点；空列表返回空数组', () => {
+    expect(selectCableDevices([device(1, { maxOutputChannels: 1 })])).toEqual([])
+    expect(selectCableDevices([device(1, { name: 'Speakers' })])).toEqual([])
+    expect(selectCableDevices([])).toEqual([])
   })
 })
 
@@ -261,6 +275,70 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
     mgr.writeInputPCM(chunk(1200))
     await settle()
     expect(f.opens.length).toBe(2)
+    await mgr.stop()
+  })
+
+  it('端点采样率取设备 defaultSampleRate（48000）——不被硬编码 44100 污染', async () => {
+    const f = createFake()
+    f.setDevices([device(21, { defaultSampleRate: 48000 })])
+    const mgr = new VirtualAudioManager(f.api)
+    await mgr.start()
+    mgr.writeInputPCM(chunk(1200, 0.5, 48000))
+    await settle()
+
+    expect(f.opens.length).toBe(1)
+    // WASAPI 共享模式须与端点混音格式一致：设备上报 48000 就必须用 48000 开流
+    expect(f.opens[0]).toEqual({ deviceId: 21, sampleRate: 48000, channelCount: 2 })
+    expect(mgr.getDeviceStatus().inputActive).toBe(true)
+    await mgr.stop()
+  })
+
+  it('设备上报采样率被拒（Invalid sample rate）→ 沿降级候选换率重试成功', async () => {
+    const f = createFake()
+    f.setDevices([device(21, { defaultSampleRate: 44100 })]) // 设备谎报 44100
+    f.openErrors.push(new Error('Invalid sample rate')) // 实际只认 48000
+    const mgr = new VirtualAudioManager(f.api)
+    await mgr.start()
+    mgr.writeInputPCM(chunk(1200, 0.5, 48000))
+    await settle()
+
+    expect(f.opens.map((o) => o.sampleRate)).toEqual([44100, 48000]) // 先试上报值，再降级
+    expect(mgr.getDeviceStatus().inputActive).toBe(true)
+    await mgr.stop()
+  })
+
+  it('非采样率错误（Invalid device）不触发换率，直接交回重扫', async () => {
+    const f = createFake()
+    f.setDevices([device(21)]) // 重扫仍是同一 id
+    f.openErrors.push(new Error('Invalid device'))
+    const mgr = new VirtualAudioManager(f.api)
+    await mgr.start()
+    mgr.writeInputPCM(chunk(1200))
+    await settle()
+
+    expect(f.opens.length).toBe(1) // 未换率，仅一次尝试
+    expect(mgr.getDeviceStatus().inputActive).toBe(false)
+    await mgr.stop()
+  })
+
+  it('候选回退：优先级最高的候选开流失败 → 自动落到次选端点', async () => {
+    const f = createFake()
+    f.setDevices([
+      device(16, { name: 'CABLE Input (VB-Audio Virtual Cable)', maxOutputChannels: 2, defaultSampleRate: 48000 }),
+      device(19, { name: 'CABLE In 16ch (VB-Audio Virtual Cable)', maxOutputChannels: 4, defaultSampleRate: 48000 }),
+    ])
+    f.openErrors.push(new Error('Invalid device')) // 首选 #19 失败
+    const mgr = new VirtualAudioManager(f.api)
+    await mgr.start()
+    mgr.writeInputPCM(chunk(1200, 0.5, 48000))
+    await settle()
+
+    // #19（16ch）优先；失败后落到 #16——两者均 @48000
+    expect(f.opens.map((o) => ({ id: o.deviceId, sr: o.sampleRate }))).toEqual([
+      { id: 19, sr: 48000 },
+      { id: 16, sr: 48000 },
+    ])
+    expect(mgr.getDeviceStatus().inputActive).toBe(true)
     await mgr.stop()
   })
 

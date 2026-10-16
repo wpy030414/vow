@@ -93,14 +93,15 @@ const asrCtl: AsrDictation | null =
     : null
 const dictation = createDictation(loadNativeKeys(), engineCfg)
 
-const _origCreate = sseHub.createSession.bind(sseHub)
-sseHub.createSession = function (deviceName?: string, mode?: import('@vow/shared/types').RecordMode) {
-  const session = _origCreate(deviceName, mode)
+// 上行音频接线：会话就绪（新建或复活）时挂载 onAudioChunk——
+// 虚拟麦克风写入 + ASR 消费（ASR 未激活时内部 no-op）。
+// 走 onSessionInit 钩子而非猴补丁 createSession：复活路径（服务端重启后 EventSource 重连）
+// 同样会经过 registerSession，接线不会漏。
+sseHub.onSessionInit = (session) => {
   session.onAudioChunk = ({ data, sampleRate }) => {
     virtualAudio.writeInputPCM({ data, sampleRate })
-    asrCtl?.feed(data, sampleRate) // ASR 未激活时内部 no-op
+    asrCtl?.feed(data, sampleRate)
   }
-  return session
 }
 
 virtualAudio.setOutputCallback((pcm: Buffer) => {

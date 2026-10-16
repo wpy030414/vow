@@ -110,3 +110,21 @@
 **代价与平台矩阵（诚实版）**：
 - Android Chrome / 桌面 Chrome：录音与播放均可在后台持续（依据冻结豁免策略；保活期间标签显示「播放中」指示为静默内容误报，接受）
 - iOS Safari：后台 JS 被系统级挂起、麦克风采集被 OS 收回——网页技术不可解；回前台经本项恢复逻辑自动续跑（状态不丢，后台期间音频不进上行链路）
+### A16：虚拟麦克风端点——按设备采样率开流 + 候选端点逐一尝试
+
+**决策**：虚拟麦克风开流不再硬编码 44100Hz，也不再靠元数据猜端点：
+- 采样率改为**运行时取设备上报的 `defaultSampleRate`**（`FALLBACK_SAMPLE_RATE=44100` 仅兜底；被拒 `paInvalidSampleRate` 时沿 `[48000, 44100]` 降级重试），手机上行 PCM 按此重采样、推送节拍改为 `round(1024/rate*1000)` ms。
+- `selectCableDevice`（返回单个「恰好 2 声道」端点）改为 `selectCableDevices`（返回**按可用性启发排序的候选列表**），开流时对「设备 × 采样率」组合**逐一尝试直到成功**；非采样率错误（`paInvalidDevice`）在该设备上直接换下一个候选设备。排序仅优化首次尝试顺序：WASAPI 优先 → `16ch` 端点优先 → 输出声道数越接近 2 越优先；MME/DirectSound 端点上榜但排最后兜底。
+**理由**：
+- WASAPI 共享模式要求 `Pa_OpenStream` 的 sampleRate 与端点混音格式**完全一致**，否则 `paInvalidSampleRate`。实机探针：`CABLE Input` 端点混音格式为 48000，而历史代码写死 44100 → 恒开流失败（正是报错 `Invalid sample rate` 的根因）。
+- 更进一步：把采样率改对（48000）后，实机 `CABLE Input`（WASAPI）仍报 `paInvalidDevice`（元数据完全正常：2 声道 / 48000Hz）——**唯一能开的 WASAPI 渲染端点是 `CABLE In 16ch`**。而旧排序 `|maxOutputChannels-2|` 恰好把 plain `CABLE Input`（2 声道）排在 `CABLE In 16ch`（4 声道）之前，于是**虚拟麦克风从未成功开流过**。端点可用性无法由元数据判定 → 只能实测开流。
+**代价**：开流可能多试若干「设备 × 采样率」组合（失败路径多几条 `Pa_OpenStream` 调用，成功路径通常首个命中）；候选顺序启发（`16ch` 命名偏好）是对 VB-Cable 端点命名的经验依赖，真正的正确性由「逐一尝试」保证而非排序。
+
+### A17：SSE 会话与传输解耦——流断开只解绑，不销毁
+
+**决策**：SSE 流的 `close` 不再销毁会话，改为 `detachStream(id, writer)` 仅解绑该连接的 `writer` 与 `onOutputAudio`（并按 writer 身份校验，避免迟到的旧连接 close 误清新连接）；会话改由保活 ping + TTL 回收统一管理。`getOrCreateStream` 对未知 id 的复活改为**按原 id 重建**（此前经 `createSession` 生成随机 id 再改写，每次重连都多记一条假 `session created`——正是刷屏的根源）。同时用 `onSessionInit` 钩子取代对 `createSession` 的猴补丁，使复活路径同样挂上 `onAudioChunk` 接线；客户端 `connect()` 加互斥旗标并在建流前先 `cleanupStream()`。
+**理由**：
+- 会话的语义是「客户端逻辑连接」（POST /session 建立、ping 续命、TTL 回收），SSE 流只是它的传输载体；而 EventSource 断线后**必然用同一 sessionId 自动重连**。在流 close 时就销毁会话，与 EventSource 的重连语义直接冲突 → 每次瞬时断连都上演「销毁→重连复活」的刷屏，并丢失会话状态（mode / isOutputEnabled / recording）。实测复现：对同一已销毁 id 重连 3 次 = 3 条假 `session created` + 3 条 `session destroyed`。
+- 「close 即销毁」原本是为堵内存泄漏（客户端离开后 `writer.write()` 不报错 → 死会话被持续灌入音频），但解绑 writer 已同样达到目的：心跳与输出广播都按 `writer` 存在性跳过；真正离线的会话由 `reapStaleSessions` 在 TTL 后清掉并按既有逻辑释放听写。
+- 客户端并发 `connect()` 各建一个会话是 active 累积成 3 的另一半原因（自动连接 / ping-404 恢复 / 配对重试多路径），互斥旗标封死。
+**代价**：关闭标签页后会话最多多存活一个 TTL（90s）才被回收（期间无内存增长，仅 `connectedCount` 短暂偏大）；瞬时断连不再立刻释放听写（改为 TTL 兜底，避免重连抖动误掐进行中的听写）。

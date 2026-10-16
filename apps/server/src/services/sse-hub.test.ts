@@ -50,3 +50,52 @@ describe('SSEHub 听写联动', () => {
     expect(events).toHaveLength(0)
   })
 })
+
+describe('SSEHub 流生命周期（断连解绑而非销毁）', () => {
+  it('getOrCreateStream 对未知 id 按【原 id】复活，不生成随机 id', () => {
+    const hub = new SSEHub()
+    const sid = 'vow-client-provided-id'
+    const { session } = hub.getOrCreateStream(sid)
+    expect(session.id).toBe(sid)
+    expect(hub.getSession(sid)).toBe(session)
+    expect(hub.getConnectionInfo().sessions).toEqual([sid])
+  })
+
+  it('onSessionInit 同时覆盖新建与复活路径（接线不漏）', () => {
+    const hub = new SSEHub()
+    const inited: string[] = []
+    hub.onSessionInit = (s) => inited.push(s.id)
+    const created = hub.createSession()
+    hub.getOrCreateStream('vow-resumed-id')
+    expect(inited).toEqual([created.id, 'vow-resumed-id'])
+  })
+
+  it('detachStream 解绑 writer 但保留会话；再取流复用同一会话', () => {
+    const hub = new SSEHub()
+    const s = hub.createSession()
+    hub.getOrCreateStream(s.id)
+    const w1 = s.writer
+    expect(w1).not.toBeNull()
+
+    hub.detachStream(s.id, w1)
+    expect(s.writer).toBeNull() // 不再接收心跳/输出广播
+    expect(hub.getSession(s.id)).toBe(s) // 会话未被销毁
+
+    hub.getOrCreateStream(s.id) // EventSource 自动重连
+    expect(s.writer).not.toBeNull()
+    expect(hub.getSession(s.id)).toBe(s) // 仍是同一会话（未重建、无刷屏日志）
+  })
+
+  it('迟到的旧连接 close（writer 已被新连接替换）不误清新 writer', () => {
+    const hub = new SSEHub()
+    const s = hub.createSession()
+    hub.getOrCreateStream(s.id)
+    const stale = s.writer
+    hub.getOrCreateStream(s.id) // 新连接先于旧 close 接管
+    const current = s.writer
+    expect(current).not.toBe(stale)
+
+    hub.detachStream(s.id, stale) // 旧连接的 close 迟到
+    expect(s.writer).toBe(current) // 不受影响
+  })
+})
