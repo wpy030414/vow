@@ -11,6 +11,7 @@
     "get-driver": "tsx scripts/get-driver.ts",
     "portaudio-check": "tsx scripts/portaudio-check.ts",
     "pair": "tsx scripts/pair.ts",
+    "run-when-os-starts": "tsx scripts/run-when-os-starts.ts",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
