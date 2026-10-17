@@ -197,7 +197,7 @@ export class VirtualAudioManager {
       inputActive: this.inputActive,
       outputActive: this.outputActive,
       installStatus: this.inputDeviceId !== null ? 'installed' : 'not_installed',
-      installError: this.inputDeviceId !== null ? null : '请运行 pnpm -w run get-driver 安装 VB-Cable 驱动',
+      installError: this.inputDeviceId !== null ? null : 'Run pnpm -w run get-driver to install the VB-Cable driver',
     }
   }
 

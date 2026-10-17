@@ -55,4 +55,15 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* 移动端禁滚：全屏固定布局，杜绝地址栏收缩造成的 100vh 溢出、橡皮筋与下拉刷新。
+     页面内容极少，始终一屏放下——滚动是纯粹的误触来源。 */
+  html,
+  body,
+  #root {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
 }

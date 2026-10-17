@@ -53,6 +53,14 @@
   页面关闭/TTL 回收/服务停止 → 强制释放
 ```
 
+### 辅助键链路（手机 → 宿主焦点窗口）
+
+```
+手机点按 ×（退格）/ ✓（回车）→ POST /api/keys/press {key:'backspace'|'enter'}
+  → koffi → user32 keybd_event 注入焦点窗口
+  录音中前端禁用（淡化）——避免与听写收尾的 SendInput 文本注入竞争焦点窗口
+```
+
 ## 技术决策
 
 | # | 决策 | 理由 |
@@ -72,6 +80,7 @@
 | `index.ts` | 入口，挂载路由 + 鉴权中间件 + 静态文件 + 音频/听写联动接线 |
 | `routes/sse.ts` | SSE 端点管理（连接池、chunk 转发、状态上报） |
 | `routes/audio.ts` | 设备列表/状态、输出捕获开关 |
+| `routes/keys.ts` | 宿主辅助键注入（POST /api/keys/press：退格 / 回车，白名单校验） |
 | `routes/pair.ts` | 配对路由——POST /api/pair 以令牌换 HttpOnly cookie（注册于鉴权中间件之前） |
 | `services/auth.ts` | 配对令牌持久化（.vow/pairing-token）+ Auth 中间件（cookie/Bearer，常量时间比对） |
 | `services/pairing-qr.ts` | 终端配对二维码打印（qrcode-terminal 动态加载，缺失降级纯链接） |
@@ -89,6 +98,7 @@
 |------|------|
 | `App.tsx` | 主布局，连接状态与联动状态汇总 |
 | `components/MicButton.tsx` | 录制按钮（Hold/Tap 双模式） |
+| `components/AuxKeyButton.tsx` | 录音键两侧辅助键（× 退格 / ✓ 回车，录音中禁用淡化） |
 | `components/ControlBar.tsx` | 融合控制栏（Hold/Tap + Listen + 「转文字」开关） |
 | `components/VolumeIndicator.tsx` | 实时音量指示 |
 | `hooks/useSSE.ts` | SSE 连接管理 hook（含保活 ping） |

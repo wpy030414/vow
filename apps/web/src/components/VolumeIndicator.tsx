@@ -21,7 +21,7 @@ export function VolumeIndicator({ level, recording }: VolumeIndicatorProps) {
   const bars = recording ? levelToBars(level) : 0
 
   return (
-    <div className="flex items-end gap-1 h-8" aria-label={`音量：${Math.round(level * 100)}%`}>
+    <div className="flex items-end gap-1 h-8" aria-label={`Volume: ${Math.round(level * 100)}%`}>
       {Array.from({ length: 5 }, (_, i) => {
         const active = i < bars
         return (

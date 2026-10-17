@@ -20,6 +20,7 @@
 - 所有 API 在 `/api/*` 路径下
 - 鉴权：除 `/api/pair`、`/api/health` 外全部需配对 cookie——`pnpm pair` 打印二维码 / `--rotate` 轮换，令牌持久于 `.vow/pairing-token`
 - SSE 端点：`/api/sse`
+- 辅助键：`POST /api/keys/press`（`backspace` / `enter`）经 user32 注入宿主机焦点窗口；录音中前端禁用
 - 虚拟音频：宿主端经 koffi FFI 直连自持 PortAudio DLL（@vow/portaudio，worker 线程），零安装期编译
 - 录制模式：`hold`（按住）和 `tap`（点击切换）
 - 输出设备开关：前端勾选后在系统中注册虚拟输出设备，手机通过 Web Audio 播放接收到的系统音频

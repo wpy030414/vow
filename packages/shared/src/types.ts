@@ -81,6 +81,22 @@ export interface StateUpdateRequest {
   audioLevel?: number
 }
 
+// ─── 宿主辅助键 ───
+
+/** 手机端可注入宿主机焦点窗口的辅助键 */
+export type HostKey = 'backspace' | 'enter'
+
+/** 辅助键注入请求 */
+export interface KeyPressRequest {
+  key: HostKey
+}
+
+/** 辅助键注入响应 */
+export interface KeyPressResponse {
+  /** 是否已注入（非 win32 或无 user32 注入能力时 false） */
+  ok: boolean
+}
+
 // ─── 连接信息 ───
 
 /** 服务端连接概览 */

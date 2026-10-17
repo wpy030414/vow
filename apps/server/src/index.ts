@@ -8,6 +8,7 @@ import { resolve } from 'node:path'
 import { createServer as createHttpsServer } from 'node:https'
 import { audioRoutes } from './routes/audio'
 import { sseRoutes } from './routes/sse'
+import { createKeyRoutes } from './routes/keys'
 import { sseHub } from './services/sse-hub'
 import { virtualAudio } from './services/virtual-audio'
 import { createDictation, resolveEngineConfig } from './services/dictation'
@@ -53,6 +54,7 @@ app.use('/api/*', createAuthMiddleware(() => tokenStore.token))
 
 app.route('/api/sse', sseRoutes)
 app.route('/api/audio', audioRoutes)
+app.route('/api/keys', createKeyRoutes())
 
 const clientDir = join(__dirname, 'client')
 if (existsSync(clientDir)) {

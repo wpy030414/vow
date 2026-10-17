@@ -12,7 +12,7 @@ interface PairingScreenProps {
 
 export function PairingScreen({ error, onRetry }: PairingScreenProps) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background">
+    <div className="flex h-full flex-col items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-6 w-full max-w-sm px-6">
         <div className="text-center select-none">
           <h1 className="text-3xl font-bold tracking-tight">vow</h1>
@@ -21,15 +21,15 @@ export function PairingScreen({ error, onRetry }: PairingScreenProps) {
 
         <div className="flex items-center gap-2 text-sm">
           <QrCode className="w-4 h-4" />
-          <span>此设备尚未配对</span>
+          <span>This device is not paired yet</span>
         </div>
 
         <div className="text-sm text-muted-foreground text-center leading-6 bg-muted/50 rounded-lg px-4 py-3 w-full">
-          1. 在宿主机终端运行 <code className="font-mono text-foreground">pnpm pair</code>
+          1. Run <code className="font-mono text-foreground">pnpm pair</code> in the host terminal
           <br />
-          2. 手机扫描终端显示的二维码（或直接打开其中的链接）
+          2. Scan the QR code shown in the terminal (or open its link on this phone)
           <br />
-          3. 若已扫码仍停留在此页，点击下方按钮重试
+          3. Already scanned and still here? Tap the button below to retry
         </div>
 
         {error && (
@@ -47,7 +47,7 @@ export function PairingScreen({ error, onRetry }: PairingScreenProps) {
           )}
         >
           <RefreshCw className="w-4 h-4" />
-          重新连接
+          Reconnect
         </button>
       </div>
     </div>

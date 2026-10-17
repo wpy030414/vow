@@ -6,12 +6,13 @@ import { useMicrophone } from './hooks/useMicrophone'
 import { useAudioOutput } from './hooks/useAudioOutput'
 import { syncAudioSession } from './lib/audio-route'
 import { MicButton } from './components/MicButton'
+import { AuxKeyButton } from './components/AuxKeyButton'
 import { ControlBar } from './components/ControlBar'
 import { VolumeIndicator } from './components/VolumeIndicator'
 import { PairingScreen } from './components/PairingScreen'
 import { WifiOff } from 'lucide-react'
 import { cn } from './lib/utils'
-import type { RecordMode, AudioDeviceStatus } from '@vow/shared/types'
+import type { RecordMode, AudioDeviceStatus, HostKey, KeyPressRequest } from '@vow/shared/types'
 
 /** 三开关的本地持久化 key（录制模式 / 播放设备 / 转文字） */
 const MODE_STORAGE_KEY = 'vow.record-mode'
@@ -76,9 +77,9 @@ export function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: t }),
           })
-          if (!resp.ok) setPairError('配对令牌无效或已轮换——请在宿主机重新运行 pnpm pair 后扫码')
+          if (!resp.ok) setPairError('Invalid or rotated pairing token — run pnpm pair on the host, then scan again')
         } catch {
-          setPairError('配对请求失败——请确认宿主机服务在运行')
+          setPairError('Pairing request failed — make sure the host service is running')
         }
         // 无论成败都抹掉地址栏中的令牌（防截图/书签同步泄漏）
         window.history.replaceState(null, '', window.location.pathname)
@@ -179,6 +180,18 @@ export function App() {
     setDictationEnabled(on)
   }, [])
 
+  // 宿主辅助键：退格 / 回车注入宿主机焦点窗口（录音中由按钮禁用态拦截）
+  const sendHostKey = useCallback(async (key: HostKey) => {
+    const body: KeyPressRequest = { key }
+    try {
+      await fetch('/api/keys/press', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    } catch { /* network glitch */ }
+  }, [])
+
   // 未配对：整个界面让位给配对引导屏
   if (unauthorized) {
     return (
@@ -193,7 +206,7 @@ export function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background">
+    <div className="flex h-full flex-col items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-8 w-full max-w-sm px-6">
         <div className="text-center select-none">
           <h1 className="text-3xl font-bold tracking-tight">vow</h1>
@@ -204,12 +217,12 @@ export function App() {
         {!connected && (
           <div className="flex flex-col items-center gap-4 py-16">
             {connecting ? (
-              <div className="text-sm text-muted-foreground animate-pulse">连接宿主机中…</div>
+              <div className="text-sm text-muted-foreground animate-pulse">Connecting to host…</div>
             ) : (
               <>
                 <div className="flex items-center gap-2 text-sm text-destructive">
                   <WifiOff className="w-4 h-4" />
-                  <span>未连接</span>
+                  <span>Not connected</span>
                 </div>
                 <button
                   type="button"
@@ -222,7 +235,7 @@ export function App() {
                     'bg-primary text-primary-foreground hover:bg-primary/90',
                   )}
                 >
-                  重试连接
+                  Reconnect
                 </button>
               </>
             )}
@@ -242,7 +255,8 @@ export function App() {
               dictationDisabled={recording || mode !== 'hold'}
             />
 
-            <div className="pt-4">
+            <div className="pt-4 flex items-center justify-center gap-6">
+              <AuxKeyButton hostKey="backspace" disabled={recording} onPress={sendHostKey} />
               <MicButton
                 mode={mode}
                 recording={recording}
@@ -251,6 +265,7 @@ export function App() {
                 onStart={startRecording}
                 onStop={stopRecording}
               />
+              <AuxKeyButton hostKey="enter" disabled={recording} onPress={sendHostKey} />
             </div>
 
             <div className="pt-6">
@@ -262,19 +277,19 @@ export function App() {
               <>
                 {deviceStatus.installStatus === 'installing' && (
                   <div className="text-xs text-muted-foreground text-center bg-muted/50 rounded-lg px-4 py-2 animate-pulse">
-                    正在安装虚拟音频设备…
+                    Installing virtual audio device…
                   </div>
                 )}
                 {deviceStatus.installStatus === 'failed' && (
                   <div className="text-xs text-destructive text-center bg-destructive/10 rounded-lg px-4 py-2">
-                    {deviceStatus.installError || '虚拟音频设备安装失败'}
+                    {deviceStatus.installError || 'Virtual audio device installation failed'}
                   </div>
                 )}
                 {deviceStatus.installStatus === 'not_installed' && !deviceStatus.virtualInputAvailable && (
                   <div className="text-xs text-muted-foreground text-center bg-muted/50 rounded-lg px-4 py-2">
                     {deviceStatus.installError
-                      ? `虚拟麦克风不可用——${deviceStatus.installError}`
-                      : '虚拟麦克风不可用'}
+                      ? `Virtual microphone unavailable — ${deviceStatus.installError}`
+                      : 'Virtual microphone unavailable'}
                   </div>
                 )}
               </>

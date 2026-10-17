@@ -177,7 +177,7 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       // worklet 侧异常（处理器抛出/退出）→ 收敛为错误态，不再无声失败
       node.onprocessorerror = () => {
         if (epoch !== startEpochRef.current) return
-        setError('音频处理器异常——请重试')
+        setError('Audio processor error — please try again')
         stopRecording()
       }
 
@@ -188,7 +188,7 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       if (epoch !== startEpochRef.current) return
       const msg = err instanceof DOMException
         ? err.name === 'NotAllowedError'
-          ? '麦克风权限被拒绝——主人能不能给咱开一下权限喵♪'
+          ? 'Microphone permission denied — please allow microphone access'
           : err.message
         : String(err)
       setError(msg)

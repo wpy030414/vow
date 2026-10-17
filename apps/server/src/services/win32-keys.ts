@@ -11,6 +11,8 @@ export const KEYEVENTF_KEYUP = 0x0002
 export const KEYEVENTF_UNICODE = 0x0004
 export const VK_LWIN = 0x5b
 export const VK_H = 0x48
+export const VK_BACK = 0x08
+export const VK_RETURN = 0x0d
 const INPUT_KEYBOARD = 1
 
 export type KeybdEventFn = (bVk: number, bScan: number, dwFlags: number, dwExtraInfo: number) => void

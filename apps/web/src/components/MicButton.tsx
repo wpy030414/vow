@@ -90,7 +90,7 @@ export function MicButton({ mode, recording, audioLevel, disabled, onStart, onSt
           // 禁用
           disabled && 'opacity-40 cursor-not-allowed',
         )}
-        aria-label={recording ? '停止录音' : '开始录音'}
+        aria-label={recording ? 'Stop recording' : 'Start recording'}
       >
         {recording ? (
           <MicOff className="w-10 h-10 animate-pulse" />

@@ -33,7 +33,7 @@ const pill = cn(
 export function ControlBar({ mode, onModeChange, modeDisabled, outputEnabled, onOutputChange, dictationEnabled, onDictationChange, dictationDisabled }: ControlBarProps) {
   return (
     <div className="inline-flex flex-wrap justify-center items-center rounded-lg bg-muted p-1 gap-1">
-      <div className="inline-flex gap-1" role="radiogroup" aria-label="录制模式">
+      <div className="inline-flex gap-1" role="radiogroup" aria-label="Recording mode">
         {modes.map((m) => {
           const active = mode === m.value
           return (
@@ -65,8 +65,8 @@ export function ControlBar({ mode, onModeChange, modeDisabled, outputEnabled, on
         type="button"
         role="checkbox"
         aria-checked={outputEnabled}
-        aria-label="作为输出设备"
-        title="作为输出设备"
+        aria-label="Use as output device"
+        title="Use as output device"
         onClick={() => onOutputChange(!outputEnabled)}
         className={cn(
           pill,
@@ -84,8 +84,8 @@ export function ControlBar({ mode, onModeChange, modeDisabled, outputEnabled, on
         type="button"
         role="checkbox"
         aria-checked={dictationEnabled}
-        aria-label="语音转文字"
-        title={mode === 'hold' ? '语音转文字：按住说话时自动转写并输入' : '语音转文字（仅 Hold 模式可用）'}
+        aria-label="Speech to text"
+        title={mode === 'hold' ? 'Speech to text: transcribe and type while holding to talk' : 'Speech to text (Hold mode only)'}
         disabled={dictationDisabled}
         onClick={() => onDictationChange(!dictationEnabled)}
         className={cn(
