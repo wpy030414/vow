@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SSEHub } from './sse-hub'
+import { SSEHub, type SSESession } from './sse-hub'
 
 function makeHub() {
   const hub = new SSEHub()
@@ -97,5 +97,65 @@ describe('SSEHub 流生命周期（断连解绑而非销毁）', () => {
 
     hub.detachStream(s.id, stale) // 旧连接的 close 迟到
     expect(s.writer).toBe(current) // 不受影响
+  })
+
+  it('重连替换 writer 时 abort 旧流——释放其队列而非等 GC', async () => {
+    const hub = new SSEHub()
+    const s = hub.createSession()
+    hub.getOrCreateStream(s.id)
+    const stale = s.writer!
+    hub.getOrCreateStream(s.id)
+    expect(s.writer).not.toBe(stale)
+    // abort 会让流进入 errored 态 → writer.closed 以同一 reason 拒绝（无 reason 即 undefined）
+    await expect(stale.closed).rejects.toBeUndefined()
+  })
+
+  it('detachStream 断连时 abort 本连接的 writer', async () => {
+    const hub = new SSEHub()
+    const s = hub.createSession()
+    hub.getOrCreateStream(s.id)
+    const w = s.writer!
+    hub.detachStream(s.id, w)
+    await expect(w.closed).rejects.toBeUndefined()
+  })
+})
+
+describe('SSEHub 下行音频背压', () => {
+  /** 用最小替身控制 desiredSize（真实 TransformStream 的队列水位依赖读端行为） */
+  function stubWriter(desiredSize: number | null) {
+    return { desiredSize } as unknown as NonNullable<SSESession['writer']>
+  }
+
+  function makeOutputHub(desiredSize: number | null) {
+    const hub = new SSEHub()
+    const s = hub.createSession()
+    const calls: number[] = []
+    s.state.isOutputEnabled = true
+    s.onOutputAudio = () => { calls.push(1) }
+    s.writer = stubWriter(desiredSize)
+    return { hub, s, calls }
+  }
+
+  it('desiredSize <= 0（消费端未消化上一块）时丢弃本块', () => {
+    const { hub, calls } = makeOutputHub(0)
+    hub.broadcastOutputAudio(Buffer.from([1, 2, 3]))
+    expect(calls).toHaveLength(0)
+  })
+
+  it('desiredSize > 0 时正常下发', () => {
+    const { hub, calls } = makeOutputHub(1)
+    hub.broadcastOutputAudio(Buffer.from([1, 2, 3]))
+    expect(calls).toHaveLength(1)
+  })
+
+  it('writer 已解绑（断连）时不调用输出回调', () => {
+    const hub = new SSEHub()
+    const s = hub.createSession()
+    let calls = 0
+    s.state.isOutputEnabled = true
+    s.onOutputAudio = () => { calls++ }
+    s.writer = null
+    hub.broadcastOutputAudio(Buffer.from([1, 2, 3]))
+    expect(calls).toBe(0)
   })
 })

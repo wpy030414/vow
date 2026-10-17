@@ -139,6 +139,9 @@ export class SSEHub {
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
     const writer = writable.getWriter()
+    // EventSource 重连时旧连接的 close 可能还没到达：立即 abort 旧流释放其队列，
+    // 否则旧 TransformStream 会一直被旧 HTTP 响应引用而滞留
+    this.abortWriter(session.writer)
     session.writer = writer
     session.lastHeartbeat = Date.now()
 
@@ -169,6 +172,8 @@ export class SSEHub {
     session.writer = null
     session.onOutputAudio = null
     session.lastHeartbeat = Date.now()
+    // 连接已断开：abort 丢弃流内积压并释放队列，不等 GC（否则重连频繁时旧流滞留）
+    this.abortWriter(writer)
   }
 
   // ─── 状态更新 ───
@@ -213,10 +218,16 @@ export class SSEHub {
 
   /** 将系统输出音频推给所有开启输出的客户端 */
   broadcastOutputAudio(data: Buffer) {
+    const payload = data.buffer as ArrayBuffer
     for (const session of this.sessions.values()) {
-      if (session.state.isOutputEnabled && session.onOutputAudio) {
-        session.onOutputAudio(data.buffer as ArrayBuffer)
-      }
+      if (!session.state.isOutputEnabled || !session.onOutputAudio) continue
+      const writer = session.writer
+      if (!writer) continue
+      // 背压门控：下行是实时音频，手机网络/后台冻结导致消费端跟不上时宁可丢块，
+      // 也不能让未 await 的 write() 在 TransformStream 队列里无界堆积
+      //（desiredSize <= 0 表示上一块尚未被消费端消化）。
+      if (writer.desiredSize !== null && writer.desiredSize <= 0) continue
+      session.onOutputAudio(payload)
     }
   }
 
@@ -266,6 +277,14 @@ export class SSEHub {
         this.destroySession(id)
       }
     }
+  }
+
+  /** 立即终止 writer 并丢弃其队列（断连/被新连接取代）——不等待数据排空 */
+  private abortWriter(writer: WritableStreamDefaultWriter<Uint8Array> | null): void {
+    if (!writer) return
+    try {
+      void writer.abort().catch(() => { /* 流已关闭/已断开 */ })
+    } catch { /* noop */ }
   }
 
   private async closeWriter(writer: WritableStreamDefaultWriter<Uint8Array> | null, _id: string) {
