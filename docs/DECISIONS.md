@@ -9,13 +9,13 @@
 
 ### A2：shared 包零构建，TS 源码直引
 
-**决策**：`@vow/shared` 通过 `exports → ./src/*.ts` 直接导出 TypeScript 源码，由 tsup `noExternal` 内联到 server bundle。
-**理由**：shared 包体量小，无需单独构建步骤；Vite 原生支持 TS，tsup 内联确保 server dist/ 自包含。
+**决策**：`@vow/shared` 通过 `exports → ./src/*.ts` 直接导出 TypeScript 源码，由 vp pack 的 `deps.alwaysBundle: [/^@vow\//]` 内联到 server bundle。
+**理由**：shared 包体量小，无需单独构建步骤；Vite 原生支持 TS，内联确保 server dist/ 自包含。`exports` 以子路径暴露（`@vow/shared/types`、`@vow/shared/constants`），故用正则匹配 scope，而非逐个枚举包名。
 
-### A3：tsup ESM + noExternal shared
+### A3：vp pack（tsdown）打包 ESM + 内联 workspace 包
 
-**决策**：server 用 tsup 打包 ESM 格式，`noExternal: ['@vow/shared']`。
-**理由**：ESM 是 Node.js 未来方向；内联 shared 避免生产部署时的路径解析问题。
+**决策**：server 用 `vp pack` 打包 ESM，配置写在 `apps/server/vite.config.ts` 的 `pack` 块（不另建 `tsdown.config.ts` / `tsup.config.ts`），产物扩展名固定为 `.js`。
+**理由**：ESM 是 Node.js 未来方向；内联 shared 避免生产部署时的路径解析问题；与 vp `build` / `check` / `test` 共用同一 CLI 与配置入口。`@vow/portaudio/package.json` 的运行时 `createRequire` 解析刻意保留为外部引用——它用于定位包内自持的 PortAudio DLL。
 
 ### A4：Vite outDir → apps/server/dist/client/
 
@@ -141,3 +141,9 @@
 - Android 侧 Chrome 支持 `AudioContext.setSinkId()`，但设备枚举粒度视机型而定：仅在标签可辨识扬声器时切换，保证不劣化为「意外端点」，不满足则等价空操作、保持默认。
 
 **代价**：iOS 需 16.4+（更早版本无 `navigator.audioSession`，输出在用过麦克风后仍走听筒，属网页技术不可解）；Android 设备标签依赖麦克风授权且机型差异大，真机行为需实测，代码在无匹配设备时静默保持默认。
+
+### A19：构建与检查统一走 vp（Vite+），由 vp 代理包管理器
+
+**决策**：移除 tsup / vitest / eslint 直装依赖，改由 `vite-plus` 提供 `vp dev` / `vp build` / `vp pack` / `vp check` / `vp test`；根目录 `vite.config.ts` 承载 workspace 级 fmt（oxfmt：无分号、单引号）与 lint（oxlint + tsgolint 类型感知）配置；不在 `package.json` 声明 `packageManager`，由 vp 依据 lockfile 检测并代理包管理器。
+**理由**：一个 CLI 覆盖 dev / build / check / test，不再拼装 vite + tsup + vitest + eslint 四套配置；格式与 lint 规则集中在仓库根，各子包 `vp check` 向上继承。`pnpm-workspace.yaml` 按 Vite+ 官方要求补 `overrides`（`vite@*` → `@voidzero-dev/vite-plus-core@1.4.0`、`vitest@*` → `5.0.5`），保证全仓共享单一 Vite / Vitest 副本，避免 `instanceof` 判断与 mock 状态跨副本断裂。
+**代价**：Node 版本钉到 24（根 `.nvmrc`）；server 需显式声明 `vitest` 才能让 `vp check` 的类型检查解析到测试导入。`overrides` 写在 `pnpm-workspace.yaml`（pnpm 10.6+ 认可该位置，lockfile 顶部的 `overrides` 块即其产物），而不是根 `package.json`。

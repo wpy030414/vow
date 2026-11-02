@@ -5,6 +5,14 @@ steps:
       if [ "${avail_kb:-0}" -lt 4194304 ]; then
         export NODE_OPTIONS='--max-old-space-size=1024'
       fi
+      # 首次引导：仓库尚无 node_modules 时没有本地 vp，需全局装一份来跑 vp install
+      if ! command -v vp >/dev/null 2>&1 && [ ! -x node_modules/.bin/vp ]; then
+        curl -fsSL https://vite.plus | bash
+        export PATH="$HOME/.local/bin:$PATH"
+      fi
+      vp install
+      # 之后统一走项目本地的 vite-plus，不依赖全局安装
+      pnpm check
       pnpm build
   - name: Run
     run: |

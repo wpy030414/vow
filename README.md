@@ -26,7 +26,7 @@ vow 让任何带浏览器的手机 / 平板，通过局域网变身为宿主机�
 ## 平台与前置要求
 
 - **Windows 10 / 11（x64）**
-- **Node.js ≥ 22.12**（vitest 5 的 engines 要求为 `^22.12 || ^24 || >=26`，故 23 / 25 不受支持；开发环境为 Node 26）
+- **Node.js 24（LTS）**——版本钉在根目录 `.nvmrc`（`nvm use` / `fnm use` 自动读取）
 - **pnpm**（建议最新稳定版；开发环境为 pnpm 12，workspace 配置用到 `allowBuilds`）
 - **VB-Cable 虚拟音频驱动**——vow 不自造虚拟声卡，而是**写入 VB-Cable 提供的 `CABLE Input` 端点**。首次使用必须先安装（见第二步），安装后**需重启系统**，端点才会出现。
 
@@ -59,7 +59,9 @@ pnpm dev
 
 > **dev 与 prod 都是 HTTPS（自签名证书）。** 首次 `pnpm dev` 会在仓库根 `.vow/` 下生成证书（SAN 含本机全部局域网 IP），Vite 与后端共用。手机首次访问需在浏览器点「继续访问」信任该证书——**浏览器要求安全上下文才允许麦克风**，因此不能用明文 HTTP 访问。
 
-辅助命令：`pnpm typecheck`（全量类型检查）、`pnpm test`（单元测试）、`pnpm portaudio-check`（PortAudio 链路冒烟，`--cable` 可向 CABLE 端点写正弦）。
+辅助命令：`pnpm check`（全量格式 + lint + 类型检查）、`pnpm test`（单元测试）、`pnpm portaudio-check`（PortAudio 链路冒烟，`--cable` 可向 CABLE 端点写正弦）。
+
+> 构建与检查统一走 **vp（Vite+）**：`vp dev` / `vp build` / `vp pack` / `vp check` / `vp test`。仓库不在 `package.json` 声明 `packageManager`，由 vp 依据 lockfile 自动检测并代理包管理器；本机未装 vp 时先执行 `curl -fsSL https://vite.plus | bash`。
 
 ### 4. 生产构建
 
@@ -132,8 +134,8 @@ vow/
 | 实时通信 | SSE（上行 POST 音频块 / 下行 push） |
 | 音频 | 手机端 Web Audio / AudioWorklet；宿主端 PortAudio（koffi FFI + worker 线程） |
 | 虚拟驱动 | VB-Cable（外部依赖，非本项目提供） |
-| 构建 | tsup（server）+ Vite（web） |
-| 包管理 | pnpm workspace |
+| 构建 | vp（Vite+）：`vp pack`（server）+ `vp build`（web） |
+| 包管理 | pnpm workspace（由 vp 代理，不声明 `packageManager`） |
 
 ## 相关文档
 
