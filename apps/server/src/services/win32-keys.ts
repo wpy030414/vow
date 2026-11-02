@@ -15,7 +15,12 @@ export const VK_BACK = 0x08
 export const VK_RETURN = 0x0d
 const INPUT_KEYBOARD = 1
 
-export type KeybdEventFn = (bVk: number, bScan: number, dwFlags: number, dwExtraInfo: number) => void
+export type KeybdEventFn = (
+  bVk: number,
+  bScan: number,
+  dwFlags: number,
+  dwExtraInfo: number,
+) => void
 
 // ─── koffi / user32 加载（进程内缓存）───
 
@@ -33,7 +38,7 @@ function loadUser32(): User32Handles | null {
     return null
   }
   try {
-    // koffi 预编译二进制随包分发，此处 createRequire 保证 tsup 打包后仍从 server 依赖解析
+    // koffi 预编译二进制随包分发，此处 createRequire 保证打包后仍从 server 依赖解析
     const koffi = require('koffi') as { load: (dll: string) => User32Handles['user32'] }
     user32Cache = { user32: koffi.load('user32.dll') }
   } catch (err) {
@@ -126,21 +131,25 @@ export function loadUnicodeSender(): SendUnicodeFn | null {
     const INPUT_UNION = koffi.union('VOW_INPUT_UNION', { mi: MOUSEINPUT, ki: KEYBDINPUT })
     const INPUT = koffi.struct('VOW_INPUT', { type: 'uint32', u: INPUT_UNION })
     const cbSize = koffi.sizeof(INPUT)
-    const sendInput = u.user32.func('uint32 __stdcall SendInput(uint32 cInputs, VOW_INPUT *pInputs, int cbSize)') as (
-      count: number,
-      inputs: unknown[],
-      size: number,
-    ) => number
+    const sendInput = u.user32.func(
+      'uint32 __stdcall SendInput(uint32 cInputs, VOW_INPUT *pInputs, int cbSize)',
+    ) as (count: number, inputs: unknown[], size: number) => number
 
     cachedSender = (unit: number) => {
       const make = (flags: number) => ({
         type: INPUT_KEYBOARD,
         u: { ki: { wVk: 0, wScan: unit, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
       })
-      const injected = sendInput(2, [make(KEYEVENTF_UNICODE), make(KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)], cbSize)
+      const injected = sendInput(
+        2,
+        [make(KEYEVENTF_UNICODE), make(KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)],
+        cbSize,
+      )
       if (injected !== 2 && !warnedSendFailure) {
         warnedSendFailure = true
-        console.warn(`[win32-keys] SendInput 注入失败（返回 ${injected}/2）——目标窗口是否以管理员运行（UIPI 拦截）？`)
+        console.warn(
+          `[win32-keys] SendInput 注入失败（返回 ${injected}/2）——目标窗口是否以管理员运行（UIPI 拦截）？`,
+        )
       }
     }
   } catch (err) {

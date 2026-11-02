@@ -5,7 +5,9 @@ if (
   !window.location.hostname.startsWith('localhost') &&
   !window.location.hostname.startsWith('127.')
 ) {
-  window.location.replace(`https://${window.location.host}${window.location.pathname}${window.location.search}`)
+  window.location.replace(
+    `https://${window.location.host}${window.location.pathname}${window.location.search}`,
+  )
 }
 
 import React from 'react'

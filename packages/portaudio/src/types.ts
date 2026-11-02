@@ -30,7 +30,11 @@ export interface PortAudioApi {
   /** 平台/路径解析是否可用（非 win32 或资源缺失 → false，接口仍可安全调用） */
   readonly supported: boolean
   getDevices(): Promise<PortAudioDevice[]>
-  openOutput(opts: { deviceId: number; sampleRate: number; channelCount: number }): Promise<PortAudioOutputStream>
+  openOutput(opts: {
+    deviceId: number
+    sampleRate: number
+    channelCount: number
+  }): Promise<PortAudioOutputStream>
   /** 关闭全部流、终止 worker；幂等；调用后本实例不可再使用 */
   shutdown(): Promise<void>
 }
@@ -44,7 +48,14 @@ export interface PortAudioWorkerData {
 
 export type MainToWorker =
   | { kind: 'req'; id: number; op: 'getDevices' }
-  | { kind: 'req'; id: number; op: 'openOutput'; deviceId: number; sampleRate: number; channelCount: number }
+  | {
+      kind: 'req'
+      id: number
+      op: 'openOutput'
+      deviceId: number
+      sampleRate: number
+      channelCount: number
+    }
   | { kind: 'req'; id: number; op: 'closeOutput'; token: number }
   | { kind: 'req'; id: number; op: 'shutdown' }
   | { kind: 'write'; token: number; audio: Float32Array }

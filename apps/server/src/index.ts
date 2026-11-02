@@ -50,7 +50,10 @@ app.get('/api/health', (c) => c.json({ status: 'ok' })) // 探活——无泄密
 
 // ⚠ 顺序即安全边界：/api/pair 必须在鉴权中间件【之前】注册（Hono 的 app.use 只作用于其后注册的路由）
 app.route('/api', createPairRoutes({ token: pairingToken, getToken: () => tokenStore.token }))
-app.use('/api/*', createAuthMiddleware(() => tokenStore.token))
+app.use(
+  '/api/*',
+  createAuthMiddleware(() => tokenStore.token),
+)
 
 app.route('/api/sse', sseRoutes)
 app.route('/api/audio', audioRoutes)
@@ -63,12 +66,20 @@ if (existsSync(clientDir)) {
     if (!existsSync(filePath)) return c.notFound()
     const ext = filePath.split('.').pop() || ''
     const mime: Record<string, string> = {
-      js: 'application/javascript', mjs: 'application/javascript',
-      css: 'text/css', html: 'text/html', svg: 'image/svg+xml',
-      png: 'image/png', ico: 'image/x-icon', json: 'application/json',
-      woff2: 'font/woff2', woff: 'font/woff',
+      js: 'application/javascript',
+      mjs: 'application/javascript',
+      css: 'text/css',
+      html: 'text/html',
+      svg: 'image/svg+xml',
+      png: 'image/png',
+      ico: 'image/x-icon',
+      json: 'application/json',
+      woff2: 'font/woff2',
+      woff: 'font/woff',
     }
-    return c.body(readFileSync(filePath), 200, { 'Content-Type': mime[ext] || 'application/octet-stream' })
+    return c.body(readFileSync(filePath), 200, {
+      'Content-Type': mime[ext] || 'application/octet-stream',
+    })
   })
 
   app.get('*', (c) => {
@@ -123,7 +134,12 @@ sseHub.onDictationChange = (active, sessionId, reason) => {
 
 console.log(`Server starting on https://localhost:${PORT}（听写引擎：${engineCfg.engine}）`)
 const { key, cert } = ensureCert(vowDir)
-serve({ fetch: app.fetch, port: PORT, createServer: createHttpsServer, serverOptions: { key, cert } })
+serve({
+  fetch: app.fetch,
+  port: PORT,
+  createServer: createHttpsServer,
+  serverOptions: { key, cert },
+})
 
 // 配对二维码：生产形态（内置前端）打印；dev 下前端在 Vite(48086)——用 `pnpm pair --port 48086`
 if (existsSync(clientDir)) {
@@ -142,5 +158,9 @@ const shutdown = async () => {
   tokenStore.close()
   process.exit(0)
 }
-process.on('SIGINT', () => { void shutdown() })
-process.on('SIGTERM', () => { void shutdown() })
+process.on('SIGINT', () => {
+  void shutdown()
+})
+process.on('SIGTERM', () => {
+  void shutdown()
+})

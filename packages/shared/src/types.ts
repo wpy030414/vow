@@ -50,12 +50,7 @@ export interface ServerEvent {
   timestamp: number
 }
 
-export type ServerEventType =
-  | 'connected'
-  | 'heartbeat'
-  | 'peer_state'
-  | 'output_audio'
-  | 'error'
+export type ServerEventType = 'connected' | 'heartbeat' | 'peer_state' | 'output_audio' | 'error'
 
 // ─── 设备状态 ───
 

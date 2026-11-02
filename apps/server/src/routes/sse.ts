@@ -5,19 +5,21 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { sseHub } from '../services/sse-hub'
 import { resolveEngineConfig } from '../services/dictation'
 import type {
-  ConnectRequest, ConnectResponse,
-  AudioChunk, AudioUploadResponse,
+  ConnectRequest,
+  ConnectResponse,
+  AudioChunk,
+  AudioUploadResponse,
   StateUpdateRequest,
   ConnectionInfo,
 } from '@vow/shared/types'
-import { SSE_HEARTBEAT_MS, LOOPBACK_SAMPLE_RATE, LOOPBACK_CHANNELS } from '@vow/shared/constants'
+import { LOOPBACK_SAMPLE_RATE, LOOPBACK_CHANNELS } from '@vow/shared/constants'
 
 export const sseRoutes = new Hono()
 
 // ─── POST /api/sse/session — 创建会话 ───
 
 sseRoutes.post('/session', async (c) => {
-  const body = await c.req.json<ConnectRequest>().catch(() => ({ mode: 'tap' } as ConnectRequest))
+  const body = await c.req.json<ConnectRequest>().catch(() => ({ mode: 'tap' }) as ConnectRequest)
   const session = sseHub.createSession(body.deviceName, body.mode)
   const res: ConnectResponse = {
     sessionId: session.id,
@@ -68,23 +70,26 @@ sseRoutes.get('/stream', async (c) => {
     const base64 = btoa(binary)
     const event = {
       type: 'output_audio' as const,
-      payload: { data: base64, sampleRate: LOOPBACK_SAMPLE_RATE, channels: LOOPBACK_CHANNELS, timestamp: Date.now() },
+      payload: {
+        data: base64,
+        sampleRate: LOOPBACK_SAMPLE_RATE,
+        channels: LOOPBACK_CHANNELS,
+        timestamp: Date.now(),
+      },
       timestamp: Date.now(),
     }
     const line = `data: ${JSON.stringify(event)}\n\n`
     const enc = new TextEncoder()
-    session.writer!.write(enc.encode(line)).catch(() => { /* client disconnected */ })
+    session.writer!.write(enc.encode(line)).catch(() => {
+      /* client disconnected */
+    })
   }
 
-  return c.newResponse(
-    stream,
-    200,
-    {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    },
-  )
+  return c.newResponse(stream, 200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  })
 })
 
 // ─── POST /api/sse/audio — 上传音频块 ───
@@ -94,7 +99,13 @@ sseRoutes.post('/audio', async (c) => {
   if (!chunk || !chunk.sessionId || !chunk.data) {
     return c.json({ error: 'Invalid audio chunk' }, 400)
   }
-  const ok = sseHub.relayAudio(chunk.sessionId, chunk.data, chunk.sampleRate, chunk.timestamp, chunk.sequence)
+  const ok = sseHub.relayAudio(
+    chunk.sessionId,
+    chunk.data,
+    chunk.sampleRate,
+    chunk.timestamp,
+    chunk.sequence,
+  )
   if (!ok) return c.json({ error: 'Session not found' }, 404)
   const resp: AudioUploadResponse = { received: chunk.sequence }
   return c.json(resp)

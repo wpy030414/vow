@@ -5,10 +5,10 @@
 // 时满足安全上下文要求，getUserMedia() 正常工作。
 //
 // vowDir 由调用方注入（index.ts 以 pnpm-workspace.yaml 为锚定位 repo 根）——
-// 修复此前固定上溯 4 层在 tsup 产物（apps/server/dist）下会漂移到仓库外的问题。
+// 修复此前固定上溯 4 层在打包产物（apps/server/dist）下会漂移到仓库外的问题。
 
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { networkInterfaces, hostname } from 'node:os'
 
@@ -39,13 +39,12 @@ function generate(vowDir: string): { keyPem: string; certPem: string } {
   if (!existsSync(vowDir)) mkdirSync(vowDir, { recursive: true })
 
   const sans = getSANs()
-  const subjectAltName = sans.join(',')
   console.log('[TLS] SANs:', sans.join(' | '))
 
   const isWin = process.platform === 'win32'
   const nullDev = isWin ? 'NUL' : '/dev/null'
   // 路径引用（处理空格和特殊字符）
-  const quote = (p: string) => isWin ? `"${p}"` : `'${p}'`
+  const quote = (p: string) => (isWin ? `"${p}"` : `'${p}'`)
   const keyQ = quote(keyPath)
   const certQ = quote(certPath)
   const sanExt = sans.map((s) => s).join(',')

@@ -7,7 +7,9 @@ function stubKeys(supported = true) {
   const pressed: string[] = []
   const keys: NativeKeys = {
     supported,
-    chord: (win, vk) => { pressed.push(`${win ? 'win+' : ''}${vk}`) },
+    chord: (win, vk) => {
+      pressed.push(`${win ? 'win+' : ''}${vk}`)
+    },
   }
   return { keys, pressed }
 }

@@ -111,8 +111,12 @@ class RingBuffer {
     this.buf = new Float32Array(size)
   }
 
-  get available(): number { return this._available }
-  get capacity(): number { return this.buf.length }
+  get available(): number {
+    return this._available
+  }
+  get capacity(): number {
+    return this.buf.length
+  }
 
   write(data: Float32Array): void {
     for (let i = 0; i < data.length; i++) {
@@ -192,12 +196,18 @@ export class VirtualAudioManager {
     return {
       virtualInputAvailable: this.inputDeviceId !== null,
       virtualOutputAvailable: this.outputDeviceId !== null,
-      inputDeviceName: this.inputDeviceId !== null ? (this.inputDeviceName ?? `VB-Cable #${this.inputDeviceId}`) : null,
+      inputDeviceName:
+        this.inputDeviceId !== null
+          ? (this.inputDeviceName ?? `VB-Cable #${this.inputDeviceId}`)
+          : null,
       outputDeviceName: this.outputDeviceId !== null ? 'WASAPI Loopback' : null,
       inputActive: this.inputActive,
       outputActive: this.outputActive,
       installStatus: this.inputDeviceId !== null ? 'installed' : 'not_installed',
-      installError: this.inputDeviceId !== null ? null : 'Run pnpm -w run get-driver to install the VB-Cable driver',
+      installError:
+        this.inputDeviceId !== null
+          ? null
+          : 'Run pnpm -w run get-driver to install the VB-Cable driver',
     }
   }
 
@@ -254,7 +264,11 @@ export class VirtualAudioManager {
     if (float32.length === 0) return
     // 手机实际采样率常为 48000，端点采样率由设备决定（多见 48000，亦可能 44100）——
     // 二者不一致时必须重采样，否则麦克风声音会被拉慢/降调
-    const resampled = this.resample(float32, data.sampleRate || this.inputSampleRate, this.inputSampleRate)
+    const resampled = this.resample(
+      float32,
+      data.sampleRate || this.inputSampleRate,
+      this.inputSampleRate,
+    )
     this.ringBuffer.write(resampled)
     // 失败退避：上次打开失败 1s 内不重试（否则每个音频块都会刷一条错误）
     if (
@@ -289,7 +303,8 @@ export class VirtualAudioManager {
     this.inputOpening = true
     try {
       const tried = new Set<number>()
-      const candidates = this.cableCandidates.length > 0 ? this.cableCandidates : await this.rescanCandidates()
+      const candidates =
+        this.cableCandidates.length > 0 ? this.cableCandidates : await this.rescanCandidates()
       if (await this.openInputStream(candidates, tried)) return
 
       // 打开失败：PortAudio 的设备枚举可能已漂移（tsx watch 硬杀进程后
@@ -297,7 +312,9 @@ export class VirtualAudioManager {
       // 只试尚未试过的 id（同 id 重试无意义，只会刷屏）
       const fresh = (await this.rescanCandidates()).filter((d) => !tried.has(d.id))
       if (fresh.length > 0) {
-        console.warn(`[VirtualAudio] device rescan → 新候选: ${fresh.map((d) => `#${d.id} "${d.name}"`).join(', ')}`)
+        console.warn(
+          `[VirtualAudio] device rescan → 新候选: ${fresh.map((d) => `#${d.id} "${d.name}"`).join(', ')}`,
+        )
         if (await this.openInputStream(fresh, tried)) return
       }
       // 仍失败：记录退避时间戳，1s 后才允许再次尝试
@@ -323,7 +340,10 @@ export class VirtualAudioManager {
    * - 其他错误（paInvalidDevice / 设备占用）→ 换下一个候选设备
    * 这是元数据无法区分可用端点时的真正判据（见 selectCableDevices 注释）。
    */
-  private async openInputStream(candidates: PortAudioDevice[], tried: Set<number>): Promise<boolean> {
+  private async openInputStream(
+    candidates: PortAudioDevice[],
+    tried: Set<number>,
+  ): Promise<boolean> {
     let lastErr: unknown = null
     for (const dev of candidates) {
       tried.add(dev.id)
@@ -349,7 +369,9 @@ export class VirtualAudioManager {
 
           this.inputActive = true
           const intervalMs = this.startInputTimer(rate)
-          console.log(`[VirtualAudio] input stream -> "${dev.name}" (id=${dev.id}, ${rate}Hz float32 stereo, ${intervalMs}ms timer)`)
+          console.log(
+            `[VirtualAudio] input stream -> "${dev.name}" (id=${dev.id}, ${rate}Hz float32 stereo, ${intervalMs}ms timer)`,
+          )
           return true
         } catch (err) {
           lastErr = err
@@ -388,7 +410,9 @@ export class VirtualAudioManager {
       }
       try {
         this.inputStream.write(stereo)
-      } catch { /* stream closed */ }
+      } catch {
+        /* stream closed */
+      }
       // 空闲检测：连续 ~60 tick（约 1.4s）无新数据则关闭设备，
       // 释放 CABLE（否则虚拟麦克风永远显示"使用中"）；新数据到达会自动重启
       idleTicks = read < MONO_CHUNK / 4 ? idleTicks + 1 : 0
@@ -401,9 +425,14 @@ export class VirtualAudioManager {
   }
 
   private stopInput(): void {
-    if (this.inputTimer) { clearInterval(this.inputTimer); this.inputTimer = null }
+    if (this.inputTimer) {
+      clearInterval(this.inputTimer)
+      this.inputTimer = null
+    }
     if (this.inputStream) {
-      void this.inputStream.stop().catch(() => { /* stream closed */ })
+      void this.inputStream.stop().catch(() => {
+        /* stream closed */
+      })
       this.inputStream = null
     }
     this.inputActive = false
@@ -447,7 +476,10 @@ export class VirtualAudioManager {
           }
         })
         this.outputActive = true
-        console.warn('[VirtualAudio] process-excluded loopback failed, fell back to system audio:', String(err))
+        console.warn(
+          '[VirtualAudio] process-excluded loopback failed, fell back to system audio:',
+          String(err),
+        )
         console.warn('[VirtualAudio] WARNING: 默认播放设备若为 CABLE In 会出现耳返回环')
       } catch (err2) {
         console.error('[VirtualAudio] output start failed:', err2)
@@ -457,7 +489,11 @@ export class VirtualAudioManager {
 
   stopOutput(): void {
     if (this.outputCapture) {
-      try { this.outputCapture.stop() } catch { /* noop */ }
+      try {
+        this.outputCapture.stop()
+      } catch {
+        /* noop */
+      }
       this.outputCapture = null
     }
     this.outputActive = false

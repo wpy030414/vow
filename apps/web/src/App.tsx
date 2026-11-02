@@ -21,36 +21,59 @@ const DICTATION_STORAGE_KEY = 'vow.dictation-enabled'
 
 /** 读取持久化值（隐私模式等场景静默返回 null） */
 function loadStored(key: string): string | null {
-  try { return localStorage.getItem(key) } catch { return null }
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
 }
 
 /** 写入持久化值（失败静默） */
 function store(key: string, value: string): void {
-  try { localStorage.setItem(key, value) } catch { /* 隐私模式等场景 */ }
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    /* 隐私模式等场景 */
+  }
 }
 
 export function App() {
-  const [mode, setMode] = useState<RecordMode>(() => (loadStored(MODE_STORAGE_KEY) === 'hold' ? 'hold' : 'tap'))
-  const [isOutputEnabled, setOutputEnabled] = useState<boolean>(() => loadStored(OUTPUT_STORAGE_KEY) === '1')
-  const [dictationEnabled, setDictationEnabled] = useState<boolean>(() => loadStored(DICTATION_STORAGE_KEY) === '1')
+  const [mode, setMode] = useState<RecordMode>(() =>
+    loadStored(MODE_STORAGE_KEY) === 'hold' ? 'hold' : 'tap',
+  )
+  const [isOutputEnabled, setOutputEnabled] = useState<boolean>(
+    () => loadStored(OUTPUT_STORAGE_KEY) === '1',
+  )
+  const [dictationEnabled, setDictationEnabled] = useState<boolean>(
+    () => loadStored(DICTATION_STORAGE_KEY) === '1',
+  )
   const [deviceStatus, setDeviceStatus] = useState<AudioDeviceStatus | null>(null)
   /** ?t= 配对尝试的错误提示（展示于配对引导屏） */
   const [pairError, setPairError] = useState<string | null>(null)
 
   // Web Audio 输出播放器
-  const { play: playOutputAudio, unlock: unlockOutputAudio, setKeepAlive, refreshSink } = useAudioOutput()
+  const {
+    play: playOutputAudio,
+    unlock: unlockOutputAudio,
+    setKeepAlive,
+    refreshSink,
+  } = useAudioOutput()
 
   // output_audio 回调
-  const onOutputAudio = useCallback((base64Data: string, sampleRate: number) => {
-    playOutputAudio(base64Data, sampleRate)
-  }, [playOutputAudio])
+  const onOutputAudio = useCallback(
+    (base64Data: string, sampleRate: number) => {
+      playOutputAudio(base64Data, sampleRate)
+    },
+    [playOutputAudio],
+  )
 
   // SSE 会话（自动连接，无手动断开入口）
-  const { sessionId, connected, connecting, unauthorized, connect, uploadAudio, updateState } = useSSE({
-    deviceName: 'vow-client',
-    mode,
-    onOutputAudio,
-  })
+  const { sessionId, connected, connecting, unauthorized, connect, uploadAudio, updateState } =
+    useSSE({
+      deviceName: 'vow-client',
+      mode,
+      onOutputAudio,
+    })
 
   // 查询设备状态（连接后）
   useEffect(() => {
@@ -77,7 +100,10 @@ export function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: t }),
           })
-          if (!resp.ok) setPairError('Invalid or rotated pairing token — run pnpm pair on the host, then scan again')
+          if (!resp.ok)
+            setPairError(
+              'Invalid or rotated pairing token — run pnpm pair on the host, then scan again',
+            )
         } catch {
           setPairError('Pairing request failed — make sure the host service is running')
         }
@@ -89,9 +115,15 @@ export function App() {
   }, [connect])
 
   // 三开关持久化：统一 effect 写入（收口全部变更路径，含失败回退）
-  useEffect(() => { store(MODE_STORAGE_KEY, mode) }, [mode])
-  useEffect(() => { store(OUTPUT_STORAGE_KEY, isOutputEnabled ? '1' : '0') }, [isOutputEnabled])
-  useEffect(() => { store(DICTATION_STORAGE_KEY, dictationEnabled ? '1' : '0') }, [dictationEnabled])
+  useEffect(() => {
+    store(MODE_STORAGE_KEY, mode)
+  }, [mode])
+  useEffect(() => {
+    store(OUTPUT_STORAGE_KEY, isOutputEnabled ? '1' : '0')
+  }, [isOutputEnabled])
+  useEffect(() => {
+    store(DICTATION_STORAGE_KEY, dictationEnabled ? '1' : '0')
+  }, [dictationEnabled])
 
   // 「播放设备」持久化恢复：新会话在服务端默认关闭——建立后补同步一次。
   // 不在此处 unlock 播放（无手势）：未解锁时音频到达会被丢弃，首次触摸由既有
@@ -122,12 +154,20 @@ export function App() {
     async (data: string, sampleRate: number, sequence: number) => {
       try {
         await uploadAudio(data, sampleRate, sequence)
-      } catch { /* network glitch */ }
+      } catch {
+        /* network glitch */
+      }
     },
     [uploadAudio],
   )
 
-  const { recording, audioLevel, error: micError, startRecording, stopRecording } = useMicrophone({ onAudioData })
+  const {
+    recording,
+    audioLevel,
+    error: micError,
+    startRecording,
+    stopRecording,
+  } = useMicrophone({ onAudioData })
 
   // 后台保活：录音中（Tap 持续态）或播放开启期间维持静默循环音源——
   // 「正在播放音频」标记令浏览器豁免后台冻结，配合「采集中」豁免实现后台续传
@@ -154,26 +194,36 @@ export function App() {
   }, [recording, sessionId, updateState, dictationEnabled, mode])
 
   // 模式切换
-  const handleModeChange = useCallback((newMode: RecordMode) => {
-    if (recording) stopRecording()
-    setMode(newMode)
-    if (sessionId) { updateState({ mode: newMode }).catch(() => {}) }
-  }, [recording, stopRecording, sessionId, updateState])
+  const handleModeChange = useCallback(
+    (newMode: RecordMode) => {
+      if (recording) stopRecording()
+      setMode(newMode)
+      if (sessionId) {
+        updateState({ mode: newMode }).catch(() => {})
+      }
+    },
+    [recording, stopRecording, sessionId, updateState],
+  )
 
   // 输出设备开关 → 后端 API
-  const handleToggleOutput = useCallback(async (on: boolean) => {
-    // 在手势内解锁输出 AudioContext（移动端要求，否则听不到声音）
-    if (on) unlockOutputAudio()
-    setOutputEnabled(on)
-    if (!sessionId) return
-    try {
-      await fetch(`/api/audio/output?sessionId=${sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: on }),
-      })
-    } catch { setOutputEnabled(!on) }
-  }, [sessionId, unlockOutputAudio])
+  const handleToggleOutput = useCallback(
+    async (on: boolean) => {
+      // 在手势内解锁输出 AudioContext（移动端要求，否则听不到声音）
+      if (on) unlockOutputAudio()
+      setOutputEnabled(on)
+      if (!sessionId) return
+      try {
+        await fetch(`/api/audio/output?sessionId=${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: on }),
+        })
+      } catch {
+        setOutputEnabled(!on)
+      }
+    },
+    [sessionId, unlockOutputAudio],
+  )
 
   // 「转文字」开关——生效条件在上方 effect 中计算（hold + 录音中）；持久化由统一 effect 承担
   const handleToggleDictation = useCallback((on: boolean) => {
@@ -189,7 +239,9 @@ export function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-    } catch { /* network glitch */ }
+    } catch {
+      /* network glitch */
+    }
   }, [])
 
   // 未配对：整个界面让位给配对引导屏
@@ -285,13 +337,14 @@ export function App() {
                     {deviceStatus.installError || 'Virtual audio device installation failed'}
                   </div>
                 )}
-                {deviceStatus.installStatus === 'not_installed' && !deviceStatus.virtualInputAvailable && (
-                  <div className="text-xs text-muted-foreground text-center bg-muted/50 rounded-lg px-4 py-2">
-                    {deviceStatus.installError
-                      ? `Virtual microphone unavailable — ${deviceStatus.installError}`
-                      : 'Virtual microphone unavailable'}
-                  </div>
-                )}
+                {deviceStatus.installStatus === 'not_installed' &&
+                  !deviceStatus.virtualInputAvailable && (
+                    <div className="text-xs text-muted-foreground text-center bg-muted/50 rounded-lg px-4 py-2">
+                      {deviceStatus.installError
+                        ? `Virtual microphone unavailable — ${deviceStatus.installError}`
+                        : 'Virtual microphone unavailable'}
+                    </div>
+                  )}
               </>
             )}
 

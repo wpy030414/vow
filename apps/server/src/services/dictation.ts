@@ -102,7 +102,9 @@ export function createDictation(
       try {
         engine.stop()!
         console.log(`[Dictation] stop (${reason}, sync)`)
-      } catch { /* 尽力而为 */ }
+      } catch {
+        /* 尽力而为 */
+      }
     },
   }
 }

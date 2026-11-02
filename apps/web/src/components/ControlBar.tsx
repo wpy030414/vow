@@ -30,7 +30,16 @@ const pill = cn(
   'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 )
 
-export function ControlBar({ mode, onModeChange, modeDisabled, outputEnabled, onOutputChange, dictationEnabled, onDictationChange, dictationDisabled }: ControlBarProps) {
+export function ControlBar({
+  mode,
+  onModeChange,
+  modeDisabled,
+  outputEnabled,
+  onOutputChange,
+  dictationEnabled,
+  onDictationChange,
+  dictationDisabled,
+}: ControlBarProps) {
   return (
     <div className="inline-flex flex-wrap justify-center items-center rounded-lg bg-muted p-1 gap-1">
       <div className="inline-flex gap-1" role="radiogroup" aria-label="Recording mode">
@@ -85,7 +94,11 @@ export function ControlBar({ mode, onModeChange, modeDisabled, outputEnabled, on
         role="checkbox"
         aria-checked={dictationEnabled}
         aria-label="Speech to text"
-        title={mode === 'hold' ? 'Speech to text: transcribe and type while holding to talk' : 'Speech to text (Hold mode only)'}
+        title={
+          mode === 'hold'
+            ? 'Speech to text: transcribe and type while holding to talk'
+            : 'Speech to text (Hold mode only)'
+        }
         disabled={dictationDisabled}
         onClick={() => onDictationChange(!dictationEnabled)}
         className={cn(

@@ -6,7 +6,11 @@ import type { PortAudioApi, PortAudioDevice, PortAudioOutputStream } from '@vow/
 const SR = 44100
 
 /** 生成指定样本数的常量值 PCM16 base64 块 */
-function chunk(samples: number, value = 0.5, sampleRate = SR): { data: string; sampleRate: number } {
+function chunk(
+  samples: number,
+  value = 0.5,
+  sampleRate = SR,
+): { data: string; sampleRate: number } {
   const int16 = new Int16Array(samples)
   for (let i = 0; i < samples; i++) int16[i] = Math.round(value * 32767)
   return { data: Buffer.from(int16.buffer).toString('base64'), sampleRate }
@@ -51,14 +55,22 @@ function createFake() {
       if (err) throw err
       const fs: Partial<FakeStream> = { writes: [], stopCount: 0, errorCb: null }
       fs.stream = {
-        write: (f) => { fs.writes!.push(f) },
-        stop: async () => { fs.stopCount! += 1 },
-        onError: (cb) => { fs.errorCb = cb },
+        write: (f) => {
+          fs.writes!.push(f)
+        },
+        stop: async () => {
+          fs.stopCount! += 1
+        },
+        onError: (cb) => {
+          fs.errorCb = cb
+        },
       }
       streams.push(fs as FakeStream)
       return fs.stream
     },
-    shutdown: async () => { shutdownCount += 1 },
+    shutdown: async () => {
+      shutdownCount += 1
+    },
   }
 
   return {
@@ -66,8 +78,13 @@ function createFake() {
     opens,
     streams,
     openErrors,
-    setDevices: (...sets: PortAudioDevice[][]) => { deviceQueue.length = 0; deviceQueue.push(...sets) },
-    get shutdownCount() { return shutdownCount },
+    setDevices: (...sets: PortAudioDevice[][]) => {
+      deviceQueue.length = 0
+      deviceQueue.push(...sets)
+    },
+    get shutdownCount() {
+      return shutdownCount
+    },
   }
 }
 
@@ -115,7 +132,10 @@ describe('selectCableDevices', () => {
   it('"16ch" 端点优先于同元数据的 plain "CABLE Input"（后者 WASAPI 开流恒失败）', () => {
     // 两者都上报 2 声道 / 48000Hz，元数据无法区分——只有名字可分
     const plain = device(16, { name: 'CABLE Input (VB-Audio Virtual Cable)', maxOutputChannels: 2 })
-    const multich = device(19, { name: 'CABLE In 16ch (VB-Audio Virtual Cable)', maxOutputChannels: 4 })
+    const multich = device(19, {
+      name: 'CABLE In 16ch (VB-Audio Virtual Cable)',
+      maxOutputChannels: 4,
+    })
     expect(selectCableDevices([plain, multich]).map((d) => d.id)).toEqual([19, 16])
   })
 
@@ -127,8 +147,12 @@ describe('selectCableDevices', () => {
 })
 
 describe('VirtualAudioManager（替身 PortAudio）', () => {
-  beforeEach(() => { vi.useFakeTimers() })
-  afterEach(() => { vi.useRealTimers() })
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
 
   it('start：扫描到 CABLE → installed；无设备 → not_installed 且安装提示不变', async () => {
     const f = createFake()
@@ -324,8 +348,16 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
   it('候选回退：优先级最高的候选开流失败 → 自动落到次选端点', async () => {
     const f = createFake()
     f.setDevices([
-      device(16, { name: 'CABLE Input (VB-Audio Virtual Cable)', maxOutputChannels: 2, defaultSampleRate: 48000 }),
-      device(19, { name: 'CABLE In 16ch (VB-Audio Virtual Cable)', maxOutputChannels: 4, defaultSampleRate: 48000 }),
+      device(16, {
+        name: 'CABLE Input (VB-Audio Virtual Cable)',
+        maxOutputChannels: 2,
+        defaultSampleRate: 48000,
+      }),
+      device(19, {
+        name: 'CABLE In 16ch (VB-Audio Virtual Cable)',
+        maxOutputChannels: 4,
+        defaultSampleRate: 48000,
+      }),
     ])
     f.openErrors.push(new Error('Invalid device')) // 首选 #19 失败
     const mgr = new VirtualAudioManager(f.api)

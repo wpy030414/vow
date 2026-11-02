@@ -74,7 +74,8 @@ export const OUTPUT_CHUNK_SAMPLES = 1024
 export const VB_CABLE_KEYWORD = 'CABLE'
 
 /** VB-Cable 驱动包下载地址 */
-export const VB_CABLE_DOWNLOAD_URL = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip'
+export const VB_CABLE_DOWNLOAD_URL =
+  'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip'
 
 /** 安装后等待设备出现的超时（毫秒） */
 export const VB_CABLE_INSTALL_TIMEOUT_MS = 30_000

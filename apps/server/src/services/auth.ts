@@ -11,7 +11,7 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, watch } from 'node:fs'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import type { MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
 

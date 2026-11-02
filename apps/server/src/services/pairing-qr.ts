@@ -31,13 +31,19 @@ function lanScore(ip: string): number {
 }
 
 /** 打印配对二维码 + 链接（第一条可达地址出二维码，其余列备用地址） */
-export function printPairingCode(port: number, token: string, log: (line: string) => void = console.log): void {
+export function printPairingCode(
+  port: number,
+  token: string,
+  log: (line: string) => void = console.log,
+): void {
   const ips = listLanIPv4().sort((a, b) => lanScore(a) - lanScore(b))
   const target = ips[0] ?? '127.0.0.1'
   const url = `https://${target}:${port}/?t=${token}`
 
   log('')
-  log('[Auth] 配对二维码——手机扫码即可连接（令牌持久于 .vow/pairing-token；轮换: pnpm pair --rotate）')
+  log(
+    '[Auth] 配对二维码——手机扫码即可连接（令牌持久于 .vow/pairing-token；轮换: pnpm pair --rotate）',
+  )
   try {
     const qr = req('qrcode-terminal') as QrTerminalModule
     qr.generate(url, { small: true }, (code) => log(code))

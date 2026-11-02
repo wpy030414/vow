@@ -22,10 +22,13 @@ export function AuxKeyButton({ hostKey, disabled, onPress }: AuxKeyButtonProps) 
   const { icon: Icon, label } = config[hostKey]
 
   // 移动端点击后焦点滞留（focus ring 常显）——与 MicButton 同理，blur 必须放在 click 里
-  const handleClick = useCallback((e: ReactMouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.blur()
-    onPress(hostKey)
-  }, [hostKey, onPress])
+  const handleClick = useCallback(
+    (e: ReactMouseEvent<HTMLButtonElement>) => {
+      e.currentTarget.blur()
+      onPress(hostKey)
+    },
+    [hostKey, onPress],
+  )
 
   return (
     <button

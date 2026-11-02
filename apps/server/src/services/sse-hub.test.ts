@@ -131,7 +131,9 @@ describe('SSEHub 下行音频背压', () => {
     const s = hub.createSession()
     const calls: number[] = []
     s.state.isOutputEnabled = true
-    s.onOutputAudio = () => { calls.push(1) }
+    s.onOutputAudio = () => {
+      calls.push(1)
+    }
     s.writer = stubWriter(desiredSize)
     return { hub, s, calls }
   }
@@ -153,7 +155,9 @@ describe('SSEHub 下行音频背压', () => {
     const s = hub.createSession()
     let calls = 0
     s.state.isOutputEnabled = true
-    s.onOutputAudio = () => { calls++ }
+    s.onOutputAudio = () => {
+      calls++
+    }
     s.writer = null
     hub.broadcastOutputAudio(Buffer.from([1, 2, 3]))
     expect(calls).toBe(0)

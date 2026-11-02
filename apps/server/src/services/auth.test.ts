@@ -4,15 +4,25 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
-import { AUTH_COOKIE_NAME, createAuthMiddleware, createTokenStore, loadOrCreateToken, tokenEquals } from './auth'
+import {
+  AUTH_COOKIE_NAME,
+  createAuthMiddleware,
+  createTokenStore,
+  loadOrCreateToken,
+  tokenEquals,
+} from './auth'
 import { createPairRoutes } from '../routes/pair'
 
 const TOKEN = 'test-token-0123456789abcdef'
 
 describe('loadOrCreateToken', () => {
   let dir: string
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vow-auth-')) })
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vow-auth-'))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   it('首次生成 128bit base64url 令牌并持久化；二次调用返回同一令牌（重启不换码）', () => {
     const t1 = loadOrCreateToken(dir)
@@ -49,7 +59,10 @@ describe('createAuthMiddleware（app 级顺序语义）', () => {
   function appWith(token: string) {
     const app = new Hono()
     app.get('/api/health', (c) => c.json({ status: 'ok' })) // 中间件之前注册 → 免鉴权
-    app.use('/api/*', createAuthMiddleware(() => token))
+    app.use(
+      '/api/*',
+      createAuthMiddleware(() => token),
+    )
     app.get('/api/secret', (c) => c.json({ ok: true }))
     return app
   }
@@ -57,14 +70,24 @@ describe('createAuthMiddleware（app 级顺序语义）', () => {
   it('无凭证 401；正确 cookie 放行；错误 cookie 401', async () => {
     const app = appWith(TOKEN)
     expect((await app.request('/api/secret')).status).toBe(401)
-    expect((await app.request('/api/secret', { headers: { Cookie: `${AUTH_COOKIE_NAME}=${TOKEN}` } })).status).toBe(200)
-    expect((await app.request('/api/secret', { headers: { Cookie: `${AUTH_COOKIE_NAME}=wrong` } })).status).toBe(401)
+    expect(
+      (await app.request('/api/secret', { headers: { Cookie: `${AUTH_COOKIE_NAME}=${TOKEN}` } }))
+        .status,
+    ).toBe(200)
+    expect(
+      (await app.request('/api/secret', { headers: { Cookie: `${AUTH_COOKIE_NAME}=wrong` } }))
+        .status,
+    ).toBe(401)
   })
 
   it('Authorization: Bearer 放行（CLI 冒烟通道）', async () => {
     const app = appWith(TOKEN)
-    expect((await app.request('/api/secret', { headers: { Authorization: `Bearer ${TOKEN}` } })).status).toBe(200)
-    expect((await app.request('/api/secret', { headers: { Authorization: 'Bearer wrong' } })).status).toBe(401)
+    expect(
+      (await app.request('/api/secret', { headers: { Authorization: `Bearer ${TOKEN}` } })).status,
+    ).toBe(200)
+    expect(
+      (await app.request('/api/secret', { headers: { Authorization: 'Bearer wrong' } })).status,
+    ).toBe(401)
   })
 
   it('中间件之前注册的路由不受影响（/api/health 免鉴权）', async () => {
@@ -78,7 +101,10 @@ describe('createPairRoutes（与中间件的注册顺序语义）', () => {
     const app = new Hono()
     // 与 index.ts 相同的接线：pair 先注册（免鉴权），中间件其后
     app.route('/api', createPairRoutes({ token }))
-    app.use('/api/*', createAuthMiddleware(() => token))
+    app.use(
+      '/api/*',
+      createAuthMiddleware(() => token),
+    )
     app.get('/api/secret', (c) => c.json({ ok: true }))
     return app
   }
@@ -113,11 +139,15 @@ describe('createPairRoutes（与中间件的注册顺序语义）', () => {
   it('缺令牌 / 非 JSON body → 401', async () => {
     const app = appWith(TOKEN)
     expect((await app.request('/api/pair', { method: 'POST' })).status).toBe(401)
-    expect((await app.request('/api/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{not json',
-    })).status).toBe(401)
+    expect(
+      (
+        await app.request('/api/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{not json',
+        })
+      ).status,
+    ).toBe(401)
   })
 
   it('拿到的 cookie 可通行受保护路由（端到端闭环）', async () => {
@@ -135,7 +165,9 @@ describe('createTokenStore（热加载：fs.watch 监听文件变化）', () => 
     dir = mkdtempSync(join(tmpdir(), 'vow-auth-hot-'))
     file = join(dir, 'pairing-token')
   })
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   it('初始读取文件令牌', () => {
     writeFileSync(file, 'hot-token-init', 'utf-8')
@@ -163,15 +195,22 @@ describe('createTokenStore（热加载：fs.watch 监听文件变化）', () => 
 
     const app = new Hono()
     app.route('/api', createPairRoutes({ token: store.token, getToken: () => store.token }))
-    app.use('/api/*', createAuthMiddleware(() => store.token))
+    app.use(
+      '/api/*',
+      createAuthMiddleware(() => store.token),
+    )
     app.get('/api/secret', (c) => c.json({ ok: true }))
 
     // 旧令牌可通行
-    expect((await app.request('/api/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: 'hot-old' }),
-    })).status).toBe(200)
+    expect(
+      (
+        await app.request('/api/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: 'hot-old' }),
+        })
+      ).status,
+    ).toBe(200)
 
     // 轮换
     writeFileSync(file, 'hot-new', 'utf-8')
@@ -181,16 +220,24 @@ describe('createTokenStore（热加载：fs.watch 监听文件变化）', () => 
     expect(store.token).toBe('hot-new')
 
     // 新令牌可配对
-    expect((await app.request('/api/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: 'hot-new' }),
-    })).status).toBe(200)
+    expect(
+      (
+        await app.request('/api/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: 'hot-new' }),
+        })
+      ).status,
+    ).toBe(200)
 
     // 旧令牌已失效
-    expect((await app.request('/api/secret', {
-      headers: { Cookie: `${AUTH_COOKIE_NAME}=hot-old` } },
-    )).status).toBe(401)
+    expect(
+      (
+        await app.request('/api/secret', {
+          headers: { Cookie: `${AUTH_COOKIE_NAME}=hot-old` },
+        })
+      ).status,
+    ).toBe(401)
 
     store.close()
   })

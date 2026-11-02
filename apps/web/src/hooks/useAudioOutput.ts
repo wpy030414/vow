@@ -60,7 +60,11 @@ export function useAudioOutput(): AudioOutputReturn {
 
   const stopKeepAlive = useCallback(() => {
     if (keepAliveRef.current) {
-      try { keepAliveRef.current.stop() } catch { /* noop */ }
+      try {
+        keepAliveRef.current.stop()
+      } catch {
+        /* noop */
+      }
       keepAliveRef.current = null
     }
   }, [])
@@ -84,17 +88,23 @@ export function useAudioOutput(): AudioOutputReturn {
     keepAliveRef.current = src
   }, [stopKeepAlive])
 
-  const setKeepAlive = useCallback((on: boolean) => {
-    keepAliveWantedRef.current = on
-    applyKeepAlive()
-  }, [applyKeepAlive])
+  const setKeepAlive = useCallback(
+    (on: boolean) => {
+      keepAliveWantedRef.current = on
+      applyKeepAlive()
+    },
+    [applyKeepAlive],
+  )
 
   // 回前台恢复：移动端后台挂起（suspended/interrupted）后不自动恢复，需显式 resume
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return
       const ctx = ctxRef.current
-      if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => { /* 待下一次手势 */ })
+      if (ctx && ctx.state !== 'running')
+        void ctx.resume().catch(() => {
+          /* 待下一次手势 */
+        })
       applyKeepAlive()
     }
     document.addEventListener('visibilitychange', onVisible)
@@ -117,43 +127,50 @@ export function useAudioOutput(): AudioOutputReturn {
       src.buffer = buf
       src.connect(ctx.destination)
       src.start()
-    } catch { /* noop */ }
+    } catch {
+      /* noop */
+    }
   }, [ensureCtx, applyKeepAlive])
 
-  const play = useCallback((base64Data: string, sampleRate: number) => {
-    const ctx = ensureCtx(sampleRate)
-    if (ctx.state !== 'running') {
-      // 未解锁（无手势）或后台挂起——尝试 resume（无手势可能无效），本块丢弃
-      void ctx.resume().catch(() => { /* 待下一次手势 */ })
-      return
-    }
+  const play = useCallback(
+    (base64Data: string, sampleRate: number) => {
+      const ctx = ensureCtx(sampleRate)
+      if (ctx.state !== 'running') {
+        // 未解锁（无手势）或后台挂起——尝试 resume（无手势可能无效），本块丢弃
+        void ctx.resume().catch(() => {
+          /* 待下一次手势 */
+        })
+        return
+      }
 
-    const pcm = decodePCM(base64Data)
-    const frames = Math.floor(pcm.length / 2) // stereo
-    if (frames === 0) return
+      const pcm = decodePCM(base64Data)
+      const frames = Math.floor(pcm.length / 2) // stereo
+      if (frames === 0) return
 
-    const buffer = ctx.createBuffer(2, frames, sampleRate)
-    const left = buffer.getChannelData(0)
-    const right = buffer.getChannelData(1)
-    for (let i = 0; i < frames; i++) {
-      left[i] = pcm[i * 2]
-      right[i] = pcm[i * 2 + 1]
-    }
+      const buffer = ctx.createBuffer(2, frames, sampleRate)
+      const left = buffer.getChannelData(0)
+      const right = buffer.getChannelData(1)
+      for (let i = 0; i < frames; i++) {
+        left[i] = pcm[i * 2]
+        right[i] = pcm[i * 2 + 1]
+      }
 
-    const source = ctx.createBufferSource()
-    source.buffer = buffer
-    source.connect(ctx.destination)
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(ctx.destination)
 
-    // 排队调度：chunk 接在已调度尾部播放；欠载时以 PREROLL 重置；
-    // 调度领先过多时也重置，避免延迟累积。立即 start() 会在每个
-    // chunk 边界产生咔哒声/断续（网络抖动直接映射为爆音）
-    const now = ctx.currentTime
-    if (nextTimeRef.current < now + 0.005 || nextTimeRef.current > now + MAX_SCHEDULE_AHEAD_S) {
-      nextTimeRef.current = now + PREROLL_S
-    }
-    source.start(nextTimeRef.current)
-    nextTimeRef.current += frames / sampleRate
-  }, [ensureCtx])
+      // 排队调度：chunk 接在已调度尾部播放；欠载时以 PREROLL 重置；
+      // 调度领先过多时也重置，避免延迟累积。立即 start() 会在每个
+      // chunk 边界产生咔哒声/断续（网络抖动直接映射为爆音）
+      const now = ctx.currentTime
+      if (nextTimeRef.current < now + 0.005 || nextTimeRef.current > now + MAX_SCHEDULE_AHEAD_S) {
+        nextTimeRef.current = now + PREROLL_S
+      }
+      source.start(nextTimeRef.current)
+      nextTimeRef.current += frames / sampleRate
+    },
+    [ensureCtx],
+  )
 
   return { play, unlock, setKeepAlive, refreshSink }
 }

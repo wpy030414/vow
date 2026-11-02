@@ -17,21 +17,39 @@ function fakeWorker() {
   let terminated = 0
   let unrefed = 0
   const w: WorkerLike = {
-    postMessage: (msg, transfer) => { posted.push({ msg: msg as MainToWorker, transfer }) },
-    on: (event, cb) => { (handlers[event] ??= []).push(cb); return w },
-    terminate: async () => { terminated += 1; return 0 },
-    unref: () => { unrefed += 1 },
+    postMessage: (msg, transfer) => {
+      posted.push({ msg: msg as MainToWorker, transfer })
+    },
+    on: (event, cb) => {
+      ;(handlers[event] ??= []).push(cb)
+      return w
+    },
+    terminate: async () => {
+      terminated += 1
+      return 0
+    },
+    unref: () => {
+      unrefed += 1
+    },
   }
-  const emit = (event: string, payload: unknown) => { for (const cb of handlers[event] ?? []) cb(payload) }
+  const emit = (event: string, payload: unknown) => {
+    for (const cb of handlers[event] ?? []) cb(payload)
+  }
   return {
     w,
     posted,
-    reply: (id: number, result: unknown) => emit('message', { kind: 'reply', id, ok: true, result }),
+    reply: (id: number, result: unknown) =>
+      emit('message', { kind: 'reply', id, ok: true, result }),
     fail: (id: number, error: string) => emit('message', { kind: 'reply', id, ok: false, error }),
-    pushStreamError: (token: number, code: number, message: string) => emit('message', { kind: 'streamError', token, code, message }),
+    pushStreamError: (token: number, code: number, message: string) =>
+      emit('message', { kind: 'streamError', token, code, message }),
     crash: (err: Error) => emit('error', err),
-    get terminated() { return terminated },
-    get unrefed() { return unrefed },
+    get terminated() {
+      return terminated
+    },
+    get unrefed() {
+      return unrefed
+    },
   }
 }
 
@@ -39,7 +57,11 @@ type Fake = ReturnType<typeof fakeWorker>
 
 function setup(overrides: Partial<CreatePortAudioOptions> = {}) {
   const workers: Fake[] = []
-  const spawnWorker = () => { const f = fakeWorker(); workers.push(f); return f.w }
+  const spawnWorker = () => {
+    const f = fakeWorker()
+    workers.push(f)
+    return f.w
+  }
   const pa = createPortAudio({
     platform: 'win32',
     resolvePaths: () => PATHS,
@@ -52,10 +74,21 @@ function setup(overrides: Partial<CreatePortAudioOptions> = {}) {
 }
 
 const lastReq = (f: Fake): { id: number } & Record<string, unknown> =>
-  f.posted.filter((p) => p.msg.kind === 'req').at(-1)!.msg as { id: number } & Record<string, unknown>
+  f.posted.filter((p) => p.msg.kind === 'req').at(-1)!.msg as { id: number } & Record<
+    string,
+    unknown
+  >
 
 const DEVICES = [
-  { id: 21, name: 'CABLE In 16ch', hostAPIName: 'Windows WASAPI', maxInputChannels: 0, maxOutputChannels: 2, defaultSampleRate: 44100, defaultLowOutputLatency: 0.01 },
+  {
+    id: 21,
+    name: 'CABLE In 16ch',
+    hostAPIName: 'Windows WASAPI',
+    maxInputChannels: 0,
+    maxOutputChannels: 2,
+    defaultSampleRate: 44100,
+    defaultLowOutputLatency: 0.01,
+  },
 ]
 
 describe('portaudio 桥（替身 worker）', () => {
@@ -76,7 +109,12 @@ describe('portaudio 桥（替身 worker）', () => {
     const { pa, workers } = setup()
     const p = pa.openOutput({ deviceId: 21, sampleRate: 44100, channelCount: 2 })
     const req = lastReq(workers[0])
-    expect(req).toMatchObject({ op: 'openOutput', deviceId: 21, sampleRate: 44100, channelCount: 2 })
+    expect(req).toMatchObject({
+      op: 'openOutput',
+      deviceId: 21,
+      sampleRate: 44100,
+      channelCount: 2,
+    })
     workers[0].reply(req.id, { token: 7 })
     const stream = await p
     expect(typeof stream.write).toBe('function')
@@ -178,14 +216,20 @@ describe('portaudio 桥（替身 worker）', () => {
     const { pa, workers } = setup({ platform: 'linux' })
     expect(pa.supported).toBe(false)
     await expect(pa.getDevices()).resolves.toEqual([])
-    await expect(pa.openOutput({ deviceId: 1, sampleRate: 44100, channelCount: 2 })).rejects.toThrow()
+    await expect(
+      pa.openOutput({ deviceId: 1, sampleRate: 44100, channelCount: 2 }),
+    ).rejects.toThrow()
     await expect(pa.shutdown()).resolves.toBeUndefined()
     expect(workers.length).toBe(0)
 
     const { pa: pa2 } = setup({ resolvePaths: () => null })
     expect(pa2.supported).toBe(false)
 
-    const { pa: pa3 } = setup({ resolvePaths: () => { throw new Error('resolve blew up') } })
+    const { pa: pa3 } = setup({
+      resolvePaths: () => {
+        throw new Error('resolve blew up')
+      },
+    })
     expect(pa3.supported).toBe(false) // safeResolve 兜底
   })
 })

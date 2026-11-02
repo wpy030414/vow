@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type {
-  ConnectRequest, ConnectResponse, AudioChunk, AudioUploadResponse,
-  ServerEvent, StateUpdateRequest, RecordMode,
+  ConnectRequest,
+  ConnectResponse,
+  AudioChunk,
+  AudioUploadResponse,
+  ServerEvent,
+  StateUpdateRequest,
+  RecordMode,
 } from '@vow/shared/types'
 import { SSE_PING_MS } from '@vow/shared/constants'
 
@@ -105,13 +110,14 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
               onOutputAudioRef.current(p.data, p.sampleRate)
             }
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       })
 
       es.addEventListener('error', () => {
         setConnected(false)
       })
-
     } catch (err) {
       console.error('[useSSE] connect error:', err)
       setConnecting(false)
@@ -122,30 +128,38 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
     }
   }, [deviceName, mode, cleanupStream])
 
-  const uploadAudio = useCallback(async (data: string, sampleRate: number, sequence: number) => {
-    if (!sessionId) throw new Error('No session')
-    const chunk: AudioChunk = { sessionId, data, sampleRate, timestamp: Date.now(), sequence }
-    const resp = await fetch('/api/sse/audio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(chunk),
-    })
-    if (!resp.ok) throw new Error(`Audio upload failed: ${resp.status}`)
-    const result: AudioUploadResponse = await resp.json()
-    return result.received
-  }, [sessionId])
+  const uploadAudio = useCallback(
+    async (data: string, sampleRate: number, sequence: number) => {
+      if (!sessionId) throw new Error('No session')
+      const chunk: AudioChunk = { sessionId, data, sampleRate, timestamp: Date.now(), sequence }
+      const resp = await fetch('/api/sse/audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(chunk),
+      })
+      if (!resp.ok) throw new Error(`Audio upload failed: ${resp.status}`)
+      const result: AudioUploadResponse = await resp.json()
+      return result.received
+    },
+    [sessionId],
+  )
 
-  const updateState = useCallback(async (update: StateUpdateRequest) => {
-    if (!sessionId) throw new Error('No session')
-    await fetch(`/api/sse/state?sessionId=${sessionId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(update),
-    })
-  }, [sessionId])
+  const updateState = useCallback(
+    async (update: StateUpdateRequest) => {
+      if (!sessionId) throw new Error('No session')
+      await fetch(`/api/sse/state?sessionId=${sessionId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(update),
+      })
+    },
+    [sessionId],
+  )
 
   useEffect(() => {
-    return () => { cleanupStream() }
+    return () => {
+      cleanupStream()
+    }
   }, [cleanupStream])
 
   // 保活 ping：每 15s 上报活跃，页面回到前台立即补一次。
@@ -165,7 +179,9 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
           cleanupStream()
           void connect()
         }
-      } catch { /* 网络抖动，忽略 */ }
+      } catch {
+        /* 网络抖动，忽略 */
+      }
     }
     const timer = setInterval(ping, SSE_PING_MS)
     const onVisible = () => {
@@ -178,5 +194,15 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
     }
   }, [sessionId, connect, cleanupStream])
 
-  return { sessionId, connected, connecting, unauthorized, lastEvent, connect, disconnect, uploadAudio, updateState }
+  return {
+    sessionId,
+    connected,
+    connecting,
+    unauthorized,
+    lastEvent,
+    connect,
+    disconnect,
+    uploadAudio,
+    updateState,
+  }
 }

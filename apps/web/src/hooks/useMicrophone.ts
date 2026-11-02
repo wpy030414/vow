@@ -67,7 +67,9 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
         workletRef.current.port.postMessage('stop')
         workletRef.current.port.onmessage = null
         workletRef.current.disconnect()
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       workletRef.current = null
     }
     // 停止音轨
@@ -121,7 +123,9 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
       streamRef.current = stream
 
       // 2. 创建 AudioContext（使用实际采样率）
-      const audioCtx = new AudioContext({ sampleRate: stream.getAudioTracks()[0].getSettings().sampleRate ?? DEFAULT_SAMPLE_RATE })
+      const audioCtx = new AudioContext({
+        sampleRate: stream.getAudioTracks()[0].getSettings().sampleRate ?? DEFAULT_SAMPLE_RATE,
+      })
       audioContextRef.current = audioCtx
 
       const actualSampleRate = audioCtx.sampleRate
@@ -186,11 +190,12 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
     } catch (err) {
       // 已被 stop 作废的尝试：静默丢弃（权限结果留待下一次按压处理，不覆盖新状态的错误展示）
       if (epoch !== startEpochRef.current) return
-      const msg = err instanceof DOMException
-        ? err.name === 'NotAllowedError'
-          ? 'Microphone permission denied — please allow microphone access'
-          : err.message
-        : String(err)
+      const msg =
+        err instanceof DOMException
+          ? err.name === 'NotAllowedError'
+            ? 'Microphone permission denied — please allow microphone access'
+            : err.message
+          : String(err)
       setError(msg)
       stopRecording()
     }
@@ -201,7 +206,10 @@ export function useMicrophone({ onAudioData }: UseMicrophoneOptions): UseMicroph
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return
       const ctx = audioContextRef.current
-      if (ctx && ctx.state !== 'running') void ctx.resume().catch(() => { /* noop */ })
+      if (ctx && ctx.state !== 'running')
+        void ctx.resume().catch(() => {
+          /* noop */
+        })
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
@@ -218,7 +226,7 @@ function float32ToPCM16(float32Array: Float32Array): Int16Array {
   const pcm16 = new Int16Array(len)
   for (let i = 0; i < len; i++) {
     const s = Math.max(-1, Math.min(1, float32Array[i]))
-    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
   }
   return pcm16
 }

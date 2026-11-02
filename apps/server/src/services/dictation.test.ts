@@ -18,11 +18,15 @@ describe('resolveEngineConfig — 默认与显式切换', () => {
   })
 
   it('注入 VOW_DICTATION_ENGINE=win-dictation 才切换到 Win+H', () => {
-    expect(resolveEngineConfig({ VOW_DICTATION_ENGINE: 'win-dictation' } as NodeJS.ProcessEnv).engine).toBe('win-dictation')
+    expect(
+      resolveEngineConfig({ VOW_DICTATION_ENGINE: 'win-dictation' } as NodeJS.ProcessEnv).engine,
+    ).toBe('win-dictation')
   })
 
   it('未知值回落 iflytek-api', () => {
-    expect(resolveEngineConfig({ VOW_DICTATION_ENGINE: 'bogus' } as NodeJS.ProcessEnv).engine).toBe('iflytek-api')
+    expect(resolveEngineConfig({ VOW_DICTATION_ENGINE: 'bogus' } as NodeJS.ProcessEnv).engine).toBe(
+      'iflytek-api',
+    )
   })
 })
 
@@ -57,7 +61,9 @@ describe('平台降级', () => {
   it('注入不可用时静默忽略且不抛错', async () => {
     const keys: NativeKeys = {
       supported: false,
-      chord: () => { throw new Error('should not fire') },
+      chord: () => {
+        throw new Error('should not fire')
+      },
     }
     const svc = createDictation(keys, WIN_CFG)
     await expect(svc.setDesired(true, 't')).resolves.toBeUndefined()

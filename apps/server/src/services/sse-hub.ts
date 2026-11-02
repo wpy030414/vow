@@ -13,7 +13,9 @@ export interface SSESession {
   /** SSE writable stream — 用于推送事件给该客户端 */
   writer: WritableStreamDefaultWriter<Uint8Array> | null
   /** 音频数据回调 — 当服务端收到音频 chunk 时触发 */
-  onAudioChunk: ((chunk: { data: string; sampleRate: number; timestamp: number; sequence: number }) => void) | null
+  onAudioChunk:
+    | ((chunk: { data: string; sampleRate: number; timestamp: number; sequence: number }) => void)
+    | null
   /** 输出音频回调 — 当系统音频需发往该客户端时调用 */
   onOutputAudio: ((data: ArrayBuffer) => void) | null
 }
@@ -28,7 +30,9 @@ export class SSEHub {
   private listeners = new Set<HubEventListener>()
 
   /** 听写联动回调——某会话的听写态翻转时触发；会话销毁时若听写仍开着则强制释放 */
-  onDictationChange: ((active: boolean, sessionId: string, reason: 'toggle' | 'release') => void) | null = null
+  onDictationChange:
+    | ((active: boolean, sessionId: string, reason: 'toggle' | 'release') => void)
+    | null = null
 
   /** 会话初始化钩子——每次会话就绪（新建或复活）时调用，用于挂载 onAudioChunk 等外部接线。
    *  比在此猴补丁 createSession 更稳：复活路径同样接线（否则复活的会话收不到上行音频）。 */
@@ -89,7 +93,6 @@ export class SSEHub {
     this.sessions.set(session.id, session)
     this.onSessionInit?.(session)
   }
-
 
   destroySession(id: string) {
     const session = this.sessions.get(id)
@@ -206,7 +209,13 @@ export class SSEHub {
 
   // ─── 音频中继 ───
 
-  relayAudio(sessionId: string, data: string, sampleRate: number, timestamp: number, sequence: number) {
+  relayAudio(
+    sessionId: string,
+    data: string,
+    sampleRate: number,
+    timestamp: number,
+    sequence: number,
+  ) {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     session.lastHeartbeat = Date.now()
@@ -252,7 +261,11 @@ export class SSEHub {
 
   private notifyListeners(sessionId: string, event: ServerEvent) {
     for (const cb of this.listeners) {
-      try { cb(sessionId, event) } catch { /* noop */ }
+      try {
+        cb(sessionId, event)
+      } catch {
+        /* noop */
+      }
     }
   }
 
@@ -283,8 +296,12 @@ export class SSEHub {
   private abortWriter(writer: WritableStreamDefaultWriter<Uint8Array> | null): void {
     if (!writer) return
     try {
-      void writer.abort().catch(() => { /* 流已关闭/已断开 */ })
-    } catch { /* noop */ }
+      void writer.abort().catch(() => {
+        /* 流已关闭/已断开 */
+      })
+    } catch {
+      /* noop */
+    }
   }
 
   private async closeWriter(writer: WritableStreamDefaultWriter<Uint8Array> | null, _id: string) {
@@ -292,7 +309,11 @@ export class SSEHub {
     try {
       await writer.close()
     } catch {
-      try { writer.releaseLock() } catch { /* noop */ }
+      try {
+        writer.releaseLock()
+      } catch {
+        /* noop */
+      }
     }
   }
 }

@@ -124,14 +124,38 @@ describe('createAsrSession', () => {
     expect(second.data.status).toBe(1)
 
     // 服务端流式 + 终帧
-    fake.emit('message', Buffer.from(JSON.stringify({ code: 0, data: { status: 0, result: { ls: false, ws: [{ cw: [{ w: '你好' }] }] } } })))
-    fake.emit('message', Buffer.from(JSON.stringify({ code: 0, data: { status: 0, result: { ls: false, ws: [{ cw: [{ w: '世界' }] }] } } })))
+    fake.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          code: 0,
+          data: { status: 0, result: { ls: false, ws: [{ cw: [{ w: '你好' }] }] } },
+        }),
+      ),
+    )
+    fake.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          code: 0,
+          data: { status: 0, result: { ls: false, ws: [{ cw: [{ w: '世界' }] }] } },
+        }),
+      ),
+    )
 
     const finished = session.finish(2000)
     const tail = JSON.parse(fake.sent[fake.sent.length - 1])
     expect(tail.data.status).toBe(2)
 
-    fake.emit('message', Buffer.from(JSON.stringify({ code: 0, data: { status: 2, result: { ls: true, ws: [{ cw: [{ w: '！' }] }] } } })))
+    fake.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          code: 0,
+          data: { status: 2, result: { ls: true, ws: [{ cw: [{ w: '！' }] }] } },
+        }),
+      ),
+    )
     await expect(finished).resolves.toBe('你好世界！')
     expect(session.isClosed()).toBe(true)
   })
@@ -139,14 +163,25 @@ describe('createAsrSession', () => {
   it('超时以 interim 兜底', async () => {
     const fake = new FakeWs()
     const session = createAsrSession(CFG, { wsFactory: () => fake as never })
-    fake.emit('message', Buffer.from(JSON.stringify({ code: 0, data: { status: 0, result: { ls: false, ws: [{ cw: [{ w: '半句' }] }] } } })))
+    fake.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          code: 0,
+          data: { status: 0, result: { ls: false, ws: [{ cw: [{ w: '半句' }] }] } },
+        }),
+      ),
+    )
     await expect(session.finish(80)).resolves.toBe('半句')
   })
 
   it('服务端错误码上报 onError', () => {
     const fake = new FakeWs()
     const errors: string[] = []
-    createAsrSession(CFG, { wsFactory: () => fake as never, onError: (e) => errors.push(e.message) })
+    createAsrSession(CFG, {
+      wsFactory: () => fake as never,
+      onError: (e) => errors.push(e.message),
+    })
     fake.emit('message', Buffer.from(JSON.stringify({ code: 10163, message: 'invalid audio' })))
     expect(errors[0]).toContain('10163')
   })

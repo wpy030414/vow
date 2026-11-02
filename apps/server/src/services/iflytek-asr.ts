@@ -24,8 +24,11 @@ const BUILTIN_CREDENTIALS_B64 =
   'eyJhcGlLZXkiOiIxNTQ2MTQwMjgyNmM4MzYwZWJjZjEyNzBjYmJhODhlNSIsImFwaVNlY3JldCI6InNIOHYyd1NTeHhIVHkxVU5mTjZkRmFTcVZqbG1SN0JCIiwiYXBwSWQiOiIxMDBJTUUifQ=='
 
 const BUILTIN: AsrConfig = (() => {
-  const parsed = JSON.parse(Buffer.from(BUILTIN_CREDENTIALS_B64, 'base64').toString('utf8')) as Partial<AsrConfig>
-  if (!parsed.apiKey || !parsed.apiSecret) throw new Error('内置讯飞凭据解码失败（BUILTIN_CREDENTIALS_B64 损坏）')
+  const parsed = JSON.parse(
+    Buffer.from(BUILTIN_CREDENTIALS_B64, 'base64').toString('utf8'),
+  ) as Partial<AsrConfig>
+  if (!parsed.apiKey || !parsed.apiSecret)
+    throw new Error('内置讯飞凭据解码失败（BUILTIN_CREDENTIALS_B64 损坏）')
   return { apiKey: parsed.apiKey, apiSecret: parsed.apiSecret, appId: parsed.appId || '100IME' }
 })()
 
@@ -165,15 +168,18 @@ function makeUid(): string {
 }
 
 export function createAsrSession(cfg: AsrConfig, opts: CreateAsrSessionOptions = {}): AsrSession {
-  const factory = opts.wsFactory ?? ((url: string) => new WebSocket(url, {
-    headers: {
-      Origin: `https://${IFLYTEK_HOST}`,
-      Pragma: 'no-cache',
-      'Cache-Control': 'no-cache',
-      // 服务端不回显子协议（不依赖协商，手动发头；ws 包严格协商会报错）
-      'Sec-WebSocket-Protocol': 'dumb-increment-protocol',
-    },
-  }))
+  const factory =
+    opts.wsFactory ??
+    ((url: string) =>
+      new WebSocket(url, {
+        headers: {
+          Origin: `https://${IFLYTEK_HOST}`,
+          Pragma: 'no-cache',
+          'Cache-Control': 'no-cache',
+          // 服务端不回显子协议（不依赖协商，手动发头；ws 包严格协商会报错）
+          'Sec-WebSocket-Protocol': 'dumb-increment-protocol',
+        },
+      }))
 
   const framer = createFramer()
   const ws = factory(buildSignedUrl(cfg))
@@ -233,7 +239,11 @@ export function createAsrSession(cfg: AsrConfig, opts: CreateAsrSessionOptions =
   ws.on('message', (raw: RawData) => {
     let msg: WsMessage
     try {
-      const buf = Buffer.isBuffer(raw) ? raw : Array.isArray(raw) ? Buffer.concat(raw) : Buffer.from(raw)
+      const buf = Buffer.isBuffer(raw)
+        ? raw
+        : Array.isArray(raw)
+          ? Buffer.concat(raw)
+          : Buffer.from(raw)
       msg = JSON.parse(buf.toString())
     } catch {
       return
@@ -252,7 +262,11 @@ export function createAsrSession(cfg: AsrConfig, opts: CreateAsrSessionOptions =
       if (timeoutTimer) clearTimeout(timeoutTimer)
       resolveFinish?.(interim)
       resolveFinish = null
-      try { ws.close() } catch { /* noop */ }
+      try {
+        ws.close()
+      } catch {
+        /* noop */
+      }
     }
   })
 
@@ -284,7 +298,11 @@ export function createAsrSession(cfg: AsrConfig, opts: CreateAsrSessionOptions =
           if (!finished) {
             finished = true
             resolve(interim)
-            try { ws.close() } catch { /* noop */ }
+            try {
+              ws.close()
+            } catch {
+              /* noop */
+            }
           }
         }, timeoutMs)
       })
@@ -295,7 +313,11 @@ export function createAsrSession(cfg: AsrConfig, opts: CreateAsrSessionOptions =
       if (timeoutTimer) clearTimeout(timeoutTimer)
       resolveFinish?.(interim)
       resolveFinish = null
-      try { ws.close() } catch { /* noop */ }
+      try {
+        ws.close()
+      } catch {
+        /* noop */
+      }
     },
 
     isClosed: () => finished,
