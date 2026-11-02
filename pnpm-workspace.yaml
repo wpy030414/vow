@@ -1,6 +1,13 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# Vite+ 官方要求：让全仓共享单一 Vite / Vitest 副本（版本对齐 vite-plus@1.4.0 自带工具链）
+overrides:
+  vite@*: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vitest@*: 5.0.5
+
+# pnpm 10+ 默认拦截依赖构建脚本；tsx 依赖 esbuild，segfault-handler 需原生编译
 allowBuilds:
   esbuild: true
   koffi: false
