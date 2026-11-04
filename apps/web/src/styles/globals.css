@@ -67,3 +67,74 @@
     overscroll-behavior: none;
   }
 }
+
+/* ─── qwennote-eva 眼睛动画（EvaScreen 专用；眨眼由 React 随机引擎驱动，不在此处）─── */
+
+/* 寻找中：渐变小圆点左右扫视（connecting 情绪，挂在眼睛 SVG 的 g 层上） */
+@keyframes eva-search {
+  0%,
+  100% {
+    transform: translateX(-12px);
+  }
+  50% {
+    transform: translateX(12px);
+  }
+}
+.eva-search {
+  animation: eva-search 0.9s ease-in-out infinite;
+}
+
+/* 呼吸：整排眼睛的极轻微缩放，赋予待机时的「活着」感 */
+@keyframes eva-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+.eva-breathe {
+  animation: eva-breathe 3.8s ease-in-out infinite;
+}
+
+/* ─── qwennote-eva 屏幕辉光：顺窗口形状向内发散 ───
+   不画边框、不做硬描边——光从视口四边朝屏心连续衰减，形状天然跟随窗口。
+   四层由近及远叠出光学式衰减（贴边最亮、向屏心渐隐、角部自然更亮）。
+   注意：**不要**加 inset 0 0 0 Npx 这类实心描边——它会让第一像素到第二像素
+   断崖式跌落，视觉上就是一圈被切开的硬边。 */
+
+@keyframes eva-glow-breathe {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 6px 0 rgba(99, 255, 180, 0.5),
+      inset 0 0 22px 2px rgba(99, 255, 180, 0.32),
+      inset 0 0 70px 6px rgba(2, 255, 183, 0.18),
+      inset 0 0 160px 16px rgba(53, 230, 192, 0.08);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 6px 0 rgba(53, 230, 192, 0.5),
+      inset 0 0 22px 2px rgba(53, 230, 192, 0.32),
+      inset 0 0 70px 6px rgba(99, 255, 180, 0.18),
+      inset 0 0 160px 16px rgba(2, 255, 183, 0.08);
+  }
+}
+
+/* 向内发散：inset 阴影只画在盒子内侧，形状 = 视口矩形 */
+.eva-glow {
+  box-shadow:
+    inset 0 0 6px 0 rgba(99, 255, 180, 0.5),
+    inset 0 0 22px 2px rgba(99, 255, 180, 0.32),
+    inset 0 0 70px 6px rgba(2, 255, 183, 0.18),
+    inset 0 0 160px 16px rgba(53, 230, 192, 0.08);
+  animation: eva-glow-breathe 6s ease-in-out infinite;
+}
+
+/* 尊重系统「减少动态效果」：辉光仍可见（状态可辨识），只是不再呼吸 */
+@media (prefers-reduced-motion: reduce) {
+  .eva-glow {
+    animation: none;
+  }
+}

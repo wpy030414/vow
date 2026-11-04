@@ -23,4 +23,5 @@
 - 辅助键：`POST /api/keys/press`（`backspace` / `enter`）经 user32 注入宿主机焦点窗口；录音中前端禁用
 - 虚拟音频：宿主端经 koffi FFI 直连自持 PortAudio DLL（@vow/portaudio，worker 线程），零安装期编译
 - 录制模式：`hold`（按住）和 `tap`（点击切换）
+- 前端形态：`config.yml` 顶层 `mode`——`codex-micro`（默认）/ `qwennote-eva`（Eva 眼睛屏，服务端强制：仅 Tap、耳返恒关、ASR 恒随录音，见 docs/DECISIONS.md A24）
 - 输出设备开关：前端勾选后在系统中注册虚拟输出设备，手机通过 Web Audio 播放接收到的系统音频

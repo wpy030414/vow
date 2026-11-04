@@ -213,3 +213,70 @@
 - 占位头（`0xFFFFFFFF`）+ 启动修补：进程被强杀 / 断电时文件头长度未知。启动时扫描录 `recording/` 并对占位头按文件实际大小回填，使残次录音依然可播放；代价是启动时多一次目录扫描（目录不存在直接跳过）。
 
 **代价**：录音**不自动清理**，长期开启会持续占用磁盘，需用户自行定期删除 `.vow/recordings/`；`AudioArchive` 未做按文件大小/时长的轮转，超长录音上限受 WAV 32 位长度字段约束（约 4GiB，PCM16 单声道 @44.1kHz 约 13 小时）。
+
+### A24：前端形态配置 `mode`——qwennote-eva 桌宠形态的服务端硬约束
+
+**决策**：`config.yml` 新增顶层 `mode`（默认 `codex-micro`，可选 `qwennote-eva`，白名单外回退默认）。`qwennote-eva` 是「屏幕形态」：前端整屏只剩一对随状态变情的眼睛（`EvaScreen`：连接中扫视 / 待机眨眼 / 录音中随音量律动的辉光 / 停录眯眼笑 / 掉线下垂眼），整屏轻触即 Tap 录音。其能力约束**全部在服务端强制**——策略收敛在 `services/app-mode.ts` 的 `createModePolicy` 纯函数，经路由工厂（`createSseRoutes` / `createAudioRoutes`，对齐既有 `createKeyRoutes` 模式）注入：
+
+- 会话录制模式恒 `tap`（connect 请求与 state 上报均被整形）
+- 耳返（输出捕获）恒关：`POST /api/audio/output` 的开启请求直接 400
+- ASR 听写恒随录音态：state 上报中 `dictation` 被改写为当前 `recording`（上报未携带 recording 时沿用会话当前值）
+
+**理由**：
+- 形态是**部署期选择**而非运行期偏好：一部专用手机钉在桌上当「Eva 屏幕」，不该每次连接都在前端翻开关——配置进 `config.yml`，与 A16/A20「真正存在选择才进配置」的哲学一致。
+- 约束放服务端而非仅前端藏 UI：`mode` 决定的是产品形态边界，绕过 UI 直打 API 也不该击穿；且前端无状态化——换浏览器 / 清存储，形态不变。
+- Eva 形态天然只要「说话 → 文字」一条链路：耳返会让眼睛屏幕播放系统声（喧宾夺主）；Hold 对整屏触摸形态无意义（没有可按住的按钮）。砍掉的功能对应的 localStorage 偏好（hold / 耳返勾选）由前端归一化压回，服务端策略兜底。
+- 前端形态感知双通道：开机即探 `GET /api/sse/info`（已配对场景无需等会话建立，Eva 专机开机直接进眼睛屏）+ `ConnectResponse.appMode`（配对后首次连接等 info 未授权探不到的路径），App 单一状态归并。
+
+**代价**：`sse` / `audio` 路由由导出常量改为工厂函数（仅 `index.ts` 一处接线变更）；Eva 形态不提供辅助键（退格/回车）与音量指示——是刻意最小化的屏幕形态，需要时切回 `codex-micro`。
+
+**视觉规格的考据来源（2026-11 反编译）**：眼睛几何与表情语义移植自**千问 App 7.5.5**（`com.aliyun.tongyi`）内置语音表情库（`assets/lottie/{audio/face,toast,baby}`）：双眼中心距 ±70、单眼 60×120、圆角 30（=半宽，完美胶囊）；官方所有情绪均为同一对胶囊的尺寸/位置 morph——眨眼 60×120→120×10（宽扁线）、开心 60×50 眯眼 + `#fa84a5` 腮红、难过 100×90 半睁 + 下移 6、环顾整层平移 ±10。荧光绿取自**钉钉**（`com.alibaba.android.rimet`）AI 系资产：celebrate 眼部 `#63ffb4`、AI 通话 `#02ffb7`（Eva 本体的眼睛渲染在钉钉动态模块内，基础包不可得；`motor_temperature_face_follow.json` 云台指令日志证明该功能同包同源）。千问 App 自身的眼睛为灰蓝 `#4d4d5d`（日/夜同色，运行时换色），绿色系为钉钉 AI 门派签名色。**全屏形态的等比调整**：官方尺寸面向小尺寸 UI，vow 整屏显示时加宽并拉开间距——单眼 96×120 r48、双眼中心 ±86（间距 172），荧光晕矩形与眼睛同属一个变换组，随眼睛尺寸同帧缩放。
+
+#### A24 附录：QwenNote Eva 内部实现探测（钉钉手机客户端 9.x 反编译）
+
+> 目的：让 `qwennote-eva` 形态在**观感与表达语义**上贴近真机，而非凭想象。结论均出自 `com.alibaba.android.rimet` APK 的 34 个 dex 字符串表与 `assets/`，未使用任何需账号登录的云端接口。
+
+**一、模块地图**
+
+| 层 | 内部代号 | 位置 |
+|---|---|---|
+| 上层业务 | **SharpEyes** | `com.alibaba.android.sharpeyes.*`（300+ 类） |
+| 机器人底座链路 | dock / idock | `com.alibaba.dingtalk.dock/*`（240 类） |
+| 视频渲染 | SharpEyesVideoView | `dock/video/SharpEyesVideoView` |
+| 动画编排 | animv2 | `sharpeyes/manager/animv2/*` |
+| 资源分发 | Fireeye | `sharpeyes/idl/model/GetFireeyeModelResource*` + `resource/{ResourceDownloader,ResourceExtractor,ResourceInstaller}`；CDN 侧可见 `dingapp-resource.dingtalk.com` |
+| 情绪推送 | FieryGoldenEyes | `idl/sync/model/FieryGoldenEyesPushMessage` |
+
+**二、眼睛是「预渲染视频」，不是 Lottie / Canvas**
+
+- `SharpEyesVideoView` + `VideoPlaybackListener` + `OnFirstFrameRenderedListener`
+- 动作编排：`ActionSequenceLoader` → `ActionPlayManager` → 设备命令 `CMD_0x13`（传输动作组，带 `frameCount`）→ `CMD_0x14`（执行/停止）
+- 设备状态机：`IDLE ⇄ ACTION_PLAYING`（`ActionGroupRunningState`）
+- 「3 种眼睛样式」= 3 套视频资源包；资源按 `sharpeyes/skins/`、`sharpeyes/models/` 落盘，清单为 `sharpeyes/manifest.json`
+
+**三、表达模型（本项目的还原依据）**
+
+- **基底表情（base expression）+ 瞬时表情（transient expression）双层叠加**——`[AmbianceLight][EmotionBridge]` 日志原话
+- 瞬时动作词表（`ACTION_NAME_*`）：`EYE_WINK` / `EYEBROW_RAISE` / `HEAD_NOD` / `MOUTH_OPEN` / `NONE`
+- 细粒度动作（`ACTION_TYPE_*`）：`BLINK` / `OPEN_MOUTH` / `SHAKE_HEAD` / `KEEP_STILL` / `FACE_AVAILABLE`
+- 完成策略：`AnimActionBinding$CompletionPolicy`——动作播完才释放，新动作按优先级抢占
+- 盯人：`LookAroundHandler` 驱动云台 pan/tilt，**静默 10s 回正**（`silence_timeout elapsedMs=10000`），检测到人脸时不回正
+- 氛围灯：BLE「原子请求 / 场景请求」协议（cmd 十六进制），与表情联动；屏幕四周亮起 = 正在聆听
+- 皮肤主题矩阵：`SharpEyesThemeMatrix_{sharpEyesMatrixSrc, sharpEyesMatrixBackground, sharpEyesMatrixView}`
+
+**四、为什么不直接搬官方资源**
+
+1. 资源接口需**钉钉登录态 + 已绑定的设备 SN**（`SharpEyesTarget` 要求登录且绑定），非公开可拉；
+2. 资源本身是受版权保护的视频素材，且 vow 运行于浏览器，播放视频会把项目退化为播放器；
+3. **不必要**：观感 1:1 所需的尺寸、配色、节奏、表达语义已完整掌握（见正文「视觉规格的考据来源」）。
+
+**五、落到 `EvaScreen` 的映射**
+
+| 官方 | 本项目实现 |
+|---|---|
+| 基底表情 | `Base`：`idle` / `listening` / `connecting` / `offline`（由连接与录音状态决定，常驻） |
+| 瞬时表情 | `Transient`：`blink` / `wink` / `eyebrowRaise` / `headNod` / `mouthOpen` / `happy` / `sad` |
+| CompletionPolicy | `useTransient`：单活跃位 + 优先级抢占（1 微动作 / 2 动作 / 3 情绪）+ 定时回落 |
+| 自主微动作 | `useIdleBehavior`：2.6–5.2s 随机，70% 眨眼，其余穿插挑眉/点头/张嘴 |
+| 氛围灯 | 聆听时屏幕边缘渐变光环，随音量呼吸；情绪瞬时动作期间退场 |
+| LookAround | 以 `connecting` 基底整层扫视近似（浏览器无云台） |

@@ -17,6 +17,8 @@ interface UseSSEOptions {
   mode: RecordMode
   /** output_audio 事件回调 */
   onOutputAudio?: (base64Data: string, sampleRate: number) => void
+  /** 会话建立成功回调（携带服务端 ConnectResponse——App 据此同步前端形态 appMode） */
+  onSession?: (resp: ConnectResponse) => void
 }
 
 interface UseSSEReturn {
@@ -32,7 +34,12 @@ interface UseSSEReturn {
   updateState: (update: StateUpdateRequest) => Promise<void>
 }
 
-export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseSSEReturn {
+export function useSSE({
+  deviceName,
+  mode,
+  onOutputAudio,
+  onSession,
+}: UseSSEOptions): UseSSEReturn {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -44,6 +51,8 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
   const connectingRef = useRef(false)
   const onOutputAudioRef = useRef(onOutputAudio)
   onOutputAudioRef.current = onOutputAudio
+  const onSessionRef = useRef(onSession)
+  onSessionRef.current = onSession
 
   const cleanupStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -87,6 +96,7 @@ export function useSSE({ deviceName, mode, onOutputAudio }: UseSSEOptions): UseS
       const sessData: ConnectResponse = await sessResp.json()
       const sid = sessData.sessionId
       setSessionId(sid)
+      onSessionRef.current?.(sessData)
 
       const es = new EventSource(`/api/sse/stream?sessionId=${sid}`)
       eventSourceRef.current = es

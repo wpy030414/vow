@@ -1,4 +1,8 @@
 // App.tsx — vow 主界面：连接 → 录音 → 实时音量 + 虚拟音频
+//
+// 两种形态（服务端 config.yml mode 决定，见 docs/DECISIONS.md A24）：
+// - codex-micro（默认）：控制栏 + 麦克风大按钮 + 辅助键 + 音量条
+// - qwennote-eva：整屏一对眼睛（EvaScreen），整屏轻触即 Tap 录音
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSSE } from './hooks/useSSE'
@@ -12,7 +16,17 @@ import { VolumeIndicator } from './components/VolumeIndicator'
 import { PairingScreen } from './components/PairingScreen'
 import { WifiOff } from 'lucide-react'
 import { cn } from './lib/utils'
-import type { RecordMode, AudioDeviceStatus, HostKey, KeyPressRequest } from '@vow/shared/types'
+import { EvaScreen } from './components/EvaScreen'
+import { useShake } from './hooks/useShake'
+import { DEFAULT_APP_MODE, SSE_INFO_PATH } from '@vow/shared/constants'
+import type {
+  RecordMode,
+  AudioDeviceStatus,
+  HostKey,
+  KeyPressRequest,
+  AppMode,
+  ConnectionInfo,
+} from '@vow/shared/types'
 
 /** 三开关的本地持久化 key（录制模式 / 播放设备 / 转文字） */
 const MODE_STORAGE_KEY = 'vow.record-mode'
@@ -38,6 +52,11 @@ function store(key: string, value: string): void {
 }
 
 export function App() {
+  // 前端形态（config.yml mode，服务端权威）：开机即探 info 预判，会话建立时以
+  // ConnectResponse 为准（配对后首次连接等路径 info 未授权探不到）
+  const [appMode, setAppMode] = useState<AppMode>(DEFAULT_APP_MODE)
+  const eva = appMode === 'qwennote-eva'
+
   const [mode, setMode] = useState<RecordMode>(() =>
     loadStored(MODE_STORAGE_KEY) === 'hold' ? 'hold' : 'tap',
   )
@@ -67,17 +86,33 @@ export function App() {
     [playOutputAudio],
   )
 
+  // 开机即探形态：已配对场景下 info 无需等会话建立即可拿到——Eva 专机开机直接进眼睛屏
+  useEffect(() => {
+    fetch(SSE_INFO_PATH)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: ConnectionInfo | null) => {
+        if (d?.appMode) setAppMode(d.appMode)
+      })
+      .catch(() => {
+        /* 服务未起 / 未配对——保持默认形态，配对屏或重连路径兜底 */
+      })
+  }, [])
+
   // SSE 会话（自动连接，无手动断开入口）
   const { sessionId, connected, connecting, unauthorized, connect, uploadAudio, updateState } =
     useSSE({
       deviceName: 'vow-client',
-      mode,
+      // Eva 形态仅 Tap（服务端策略同样强制；此处让上报值先对齐，避免无谓的状态漂移）
+      mode: eva ? 'tap' : mode,
       onOutputAudio,
+      onSession: (resp) => {
+        if (resp.appMode) setAppMode(resp.appMode)
+      },
     })
 
-  // 查询设备状态（连接后）
+  // 查询设备状态（连接后；Eva 形态无 VB-Cable 状态提示，跳过）
   useEffect(() => {
-    if (!connected) return
+    if (!connected || eva) return
     fetch('/api/audio/devices')
       .then((r) => r.json())
       .then((d: { status: AudioDeviceStatus }) => setDeviceStatus(d.status))
@@ -125,6 +160,14 @@ export function App() {
     store(DICTATION_STORAGE_KEY, dictationEnabled ? '1' : '0')
   }, [dictationEnabled])
 
+  // Eva 形态归一化：本地持久化的 hold / 耳返勾选一概压回（形态边界由服务端强制，
+  // 这里只保证 UI 状态与上报值不再携带旧偏好）
+  useEffect(() => {
+    if (!eva) return
+    if (mode !== 'tap') setMode('tap')
+    if (isOutputEnabled) setOutputEnabled(false)
+  }, [eva, mode, isOutputEnabled])
+
   // 「播放设备」持久化恢复：新会话在服务端默认关闭——建立后补同步一次。
   // 不在此处 unlock 播放（无手势）：未解锁时音频到达会被丢弃，首次触摸由既有
   // pointerdown 解锁逻辑接管，随后自动恢复播放
@@ -133,7 +176,7 @@ export function App() {
     if (!connected || !sessionId) return
     if (syncedOutputRef.current === sessionId) return
     syncedOutputRef.current = sessionId
-    if (!isOutputEnabled) return
+    if (eva || !isOutputEnabled) return
     fetch(`/api/audio/output?sessionId=${sessionId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -169,29 +212,42 @@ export function App() {
     stopRecording,
   } = useMicrophone({ onAudioData })
 
+  // 摇晃传感器（Eva 形态的 `> <` 挤眼）：整页只实例化一次，监听器也只有一份。
+  // 权限与麦克风授权共用同一次用户手势——iOS 只认手势上下文内的 requestPermission。
+  const [shakeTick, setShakeTick] = useState(0)
+  const handleShake = useCallback(() => setShakeTick((n) => n + 1), [])
+  const shake = useShake(handleShake, true)
+
+  /** 麦克风授权入口：先同步申请传感器权限，再取麦克风 */
+  const startRecordingWithSensors = useCallback(async () => {
+    shake.arm()
+    await startRecording()
+  }, [shake, startRecording])
+
   // 后台保活：录音中（Tap 持续态）或播放开启期间维持静默循环音源——
   // 「正在播放音频」标记令浏览器豁免后台冻结，配合「采集中」豁免实现后台续传
   useEffect(() => {
-    setKeepAlive(recording || isOutputEnabled)
-  }, [recording, isOutputEnabled, setKeepAlive])
+    setKeepAlive(recording || (!eva && isOutputEnabled))
+  }, [recording, eva, isOutputEnabled, setKeepAlive])
 
   // 输出路由：录音中 / 输出开启时把移动端音频会话切到扬声器（不切则一旦用过麦克风，
   // 输出会被 iOS 锁在通话模式的「听筒」上）；两者皆否时交还浏览器自动判定
   useEffect(() => {
-    syncAudioSession(recording, isOutputEnabled)
-  }, [recording, isOutputEnabled])
+    syncAudioSession(recording, !eva && isOutputEnabled)
+  }, [recording, eva, isOutputEnabled])
 
   // 麦克风授权后设备标签才可见——授权瞬间重挑一次扬声器输出设备（Android setSinkId）
   useEffect(() => {
     if (recording) refreshSink()
   }, [recording, refreshSink])
 
-  // 录音状态变化 → 同步服务端（听写联动：仅 hold 模式 + 「转文字」开启 + 录音中激活）
+  // 录音状态变化 → 同步服务端（听写联动：codex-micro 下 hold + 「转文字」+ 录音中激活；
+  // Eva 形态 ASR 恒开——录音即听写，服务端策略同样强制）
   useEffect(() => {
     if (!sessionId) return
-    const dictationActive = recording && dictationEnabled && mode === 'hold'
+    const dictationActive = recording && (eva || (dictationEnabled && mode === 'hold'))
     updateState({ recording, audioLevel, dictation: dictationActive }).catch(() => {})
-  }, [recording, sessionId, updateState, dictationEnabled, mode])
+  }, [recording, sessionId, updateState, dictationEnabled, mode, eva])
 
   // 模式切换
   const handleModeChange = useCallback(
@@ -244,6 +300,12 @@ export function App() {
     }
   }, [])
 
+  // Eva 形态：整屏轻触的 tap 翻转（与 MicButton 的 tap 分支同语义）
+  const handleEvaToggleRecording = useCallback(() => {
+    if (recording) stopRecording()
+    else void startRecordingWithSensors()
+  }, [recording, startRecordingWithSensors, stopRecording])
+
   // 未配对：整个界面让位给配对引导屏
   if (unauthorized) {
     return (
@@ -253,6 +315,25 @@ export function App() {
           setPairError(null)
           void connect()
         }}
+      />
+    )
+  }
+
+  // Eva 形态：整屏眼睛，整屏轻触即录音；无控制栏 / 辅助键 / 音量条（A24）
+  if (eva) {
+    return (
+      <EvaScreen
+        connecting={connecting}
+        connected={connected}
+        recording={recording}
+        audioLevel={audioLevel}
+        error={micError}
+        onToggleRecording={handleEvaToggleRecording}
+        onConnect={() => {
+          unlockOutputAudio()
+          void connect()
+        }}
+        shakeTick={shakeTick}
       />
     )
   }
@@ -314,7 +395,7 @@ export function App() {
                 recording={recording}
                 audioLevel={audioLevel}
                 disabled={!connected}
-                onStart={startRecording}
+                onStart={startRecordingWithSensors}
                 onStop={stopRecording}
               />
               <AuxKeyButton hostKey="enter" disabled={recording} onPress={sendHostKey} />
