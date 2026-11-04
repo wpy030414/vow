@@ -7,15 +7,15 @@
 
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { loadOrCreateToken } from '../apps/server/src/services/auth'
-import { printPairingCode } from '../apps/server/src/services/pairing-qr'
+import { loadOrCreateToken } from '../src/services/auth'
+import { printPairingCode } from '../src/services/pairing-qr'
 
 const args = process.argv.slice(2)
 const portArg = args.indexOf('--port')
 const port = portArg >= 0 ? Number(args[portArg + 1]) : Number(process.env.PORT || 48085)
 const rotate = args.includes('--rotate')
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const vowDir = resolve(repoRoot, '.vow')
 
 const token = loadOrCreateToken(vowDir, { rotate })

@@ -236,7 +236,7 @@ export class VirtualAudioManager {
           : 'not_installed',
       installError:
         this.inputEnabled && this.inputDeviceId === null
-          ? 'Run pnpm -w run get-driver to install the VB-Cable driver'
+          ? 'Run pnpm --filter @vow/server get-driver to install the VB-Cable driver'
           : null,
     }
   }
@@ -263,7 +263,7 @@ export class VirtualAudioManager {
         )
       } else {
         console.warn('[VirtualAudio] VB-Cable not found — virtual mic unavailable')
-        console.warn('[VirtualAudio] run: pnpm -w run get-driver (as Administrator)')
+        console.warn('[VirtualAudio] run: pnpm --filter @vow/server get-driver (as Administrator)')
       }
     }
 

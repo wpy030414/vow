@@ -9,21 +9,14 @@
     "start": "pnpm --filter @vow/server start",
     "test": "pnpm -r test",
     "check": "pnpm -r check",
-    "get-driver": "tsx scripts/get-driver.ts",
-    "portaudio-check": "tsx scripts/portaudio-check.ts",
-    "pair": "tsx scripts/pair.ts",
+    "pair": "pnpm --filter @vow/server pair",
     "run-when-os-starts": "tsx scripts/run-when-os-starts.ts"
   },
   "devDependencies": {
-    "@vow/portaudio": "workspace:*",
-    "adm-zip": "^0.6.1",
     "concurrently": "^9.2.4",
-    "is-elevated": "^4.0.0",
-    "opusscript": "^0.1.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vite-plus": "^1.4.0",
-    "wait-on": "^9.1.0",
-    "ws": "^8.22.0"
+    "wait-on": "^9.1.0"
   }
 }

@@ -64,7 +64,7 @@ virtualAudio:
 ### 2b. 安装虚拟音频驱动（仅在启用虚拟麦克风时需要）
 
 ```bash
-pnpm get-driver        # 需要【管理员权限】；自动下载并安装 VB-Cable
+pnpm --filter @vow/server get-driver   # 需要【管理员权限】；自动下载并安装 VB-Cable
 ```
 
 安装完成后**重启系统**。重启后系统中会出现 `CABLE Input` / `CABLE Output` 端点；再把 `config.yml` 的 `virtualAudio.enabled` 置为 `true`。
@@ -82,7 +82,7 @@ pnpm dev
 
 > **dev 与 prod 都是 HTTPS（自签名证书）。** 首次 `pnpm dev` 会在仓库根 `.vow/` 下生成证书（SAN 含本机全部局域网 IP），Vite 与后端共用。手机首次访问需在浏览器点「继续访问」信任该证书——**浏览器要求安全上下文才允许麦克风**，因此不能用明文 HTTP 访问。
 
-辅助命令：`pnpm check`（全量格式 + lint + 类型检查）、`pnpm test`（单元测试）、`pnpm portaudio-check`（PortAudio 链路冒烟，`--cable` 可向 CABLE 端点写正弦）。
+辅助命令：`pnpm check`（全量格式 + lint + 类型检查）、`pnpm test`（单元测试与 PortAudio 链路冒烟）、`pnpm --filter @vow/server get-driver`（安装 VB-Cable）、`pnpm pair`（打印配对二维码）。
 
 > 构建与检查统一走 **vp（Vite+）**：`vp dev` / `vp build` / `vp pack` / `vp check` / `vp test`。仓库不在 `package.json` 声明 `packageManager`，由 vp 依据 lockfile 自动检测并代理包管理器；本机未装 vp 时先执行 `curl -fsSL https://vite.plus | bash`。
 
@@ -139,14 +139,16 @@ pnpm pair --rotate         # 轮换令牌——所有已配对设备立即失效
 ```
 vow/
 ├── apps/
-│   ├── server/          # Hono 后端：SSE hub、虚拟音频、听写联动、静态托管
-│   └── web/             # React 前端：录制 UI、采集（AudioWorklet）、下行播放
+│   ├── server/         # Hono 后端：SSE hub、虚拟音频、听写联动、静态托管
+│   │   └── scripts/    # server 域运维脚本（get-driver / pair）
+│   └── web/            # React 前端：录制 UI、采集（AudioWorklet）、下行播放
 ├── packages/
-│   ├── shared/          # 前后端共享类型与常量
-│   └── portaudio/       # PortAudio 封装（koffi FFI + 自持 DLL，worker 线程）
-├── config.example.yml   # 配置模板（复制为 config.yml 使用，后者不入库）
-├── scripts/             # get-driver / pair / portaudio-check 等运维脚本
-└── docs/                # PRD / ARCHITECTURE / DECISIONS
+│   ├── shared/         # 前后端共享类型与常量
+│   └── portaudio/      # PortAudio 封装（koffi FFI + 自持 DLL，worker 线程）
+├── config.example.yml  # 配置模板（复制为 config.yml 使用，后者不入库）
+├── scripts/            # 仓库级运维脚本（开机自启）
+│   └── recon/          # 讯飞私有 ASR 逆向记录
+└── docs/               # PRD / ARCHITECTURE / DECISIONS
 ```
 
 ## 技术栈

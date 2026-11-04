@@ -76,13 +76,13 @@
 
 ### A12：koffi FFI + 自持 PortAudio DLL 替换 naudiodon（安装链零编译）
 
-**决策**：虚拟麦克风链路（VB-Cable 写入）由 `@gpeng/naudiodon`（NAN 原生绑定，安装期 node-gyp 现场编译）迁移为自研 workspace 包 `@vow/portaudio`——koffi FFI（Node-API 预编译二进制随 npm 包分发）直连自持的 `portaudio_x64.dll`（PortAudio V19.7.0-devel，MIT，随仓库分发），全部 Pa_* 调用运行在独立 worker_threads 中；同时撤销此前的 pnpm patch 临时修复（commit 3eb4a6e）并移除 naudiodon 依赖。回归手段：`pnpm portaudio-check`（枚举 + 正弦写入冒烟）。
+**决策**：虚拟麦克风链路（VB-Cable 写入）由 `@gpeng/naudiodon`（NAN 原生绑定，安装期 node-gyp 现场编译）迁移为自研 workspace 包 `@vow/portaudio`——koffi FFI（Node-API 预编译二进制随 npm 包分发）直连自持的 `portaudio_x64.dll`（PortAudio V19.7.0-devel，MIT，随仓库分发），全部 Pa_* 调用运行在独立 worker_threads 中；同时撤销此前的 pnpm patch 临时修复（commit 3eb4a6e）并移除 naudiodon 依赖。回归手段：`pnpm --filter @vow/portaudio test`（枚举 + 开流 + 正弦写入冒烟，非 win32/无设备时自动跳过）。
 **理由**：
 - Node 26 官方构建内置 `enable_thin_lto/lto_jobs` 变量，node-gyp <13 将其泄漏进 MSVC 工程（LNK1117），且 naudiodon 属 NAN 老式 ABI——**每台新机器、每次 Node 大版本升级都会复发**（上游修复：node-gyp 13.0.0 / PR #3331，但 pnpm/npm 当时仍捆绑 12.4.0）
 - koffi 为 Node-API 预编译、DLL 与 Node ABI 零耦合 → 永久免编译、免 VS2022/Python 前提；全新机器 `pnpm install` 实测 3.6s，与 Node 版本解耦
 - 与既有 `win32-keys.ts`（koffi → user32）同构，仓库统一 FFI 技术栈；FFI 声明经真实探针验证（枚举 40 设备 / 开流 / 阻塞写全 0 错误）
 - 阻塞式 `Pa_WriteStream` 放独立 worker（PaStream 有线程亲和性，不可用 koffi.async），主事件循环零阻塞；完整复刻 naudiodon 的「无流时新鲜枚举」（漂移重试的前提）、`defaultLowOutputLatency` 与 closeOnError 语义
-**代价**：自持 603KB 二进制（升级 PortAudio 须重跑 portaudio-check 并复核 `worker-source.ts` 结构体布局）；FFI 声明面改为自维护（协议测试 + 冒烟脚本 + 本记录三道防线）；worker 引入 eval 字符串层（协议类型集中于 `types.ts`，替身桥测试守护）。
+**代价**：自持 603KB 二进制（升级 PortAudio 须重跑 @vow/portaudio 的冒烟测试并复核 `worker-source.ts` 结构体布局）；FFI 声明面改为自维护（协议测试 + 冒烟脚本 + 本记录三道防线）；worker 引入 eval 字符串层（协议类型集中于 `types.ts`，替身桥测试守护）。
 
 ### A13：配对令牌鉴权——二维码换取 HttpOnly cookie（/api 全量收口）
 
@@ -177,3 +177,22 @@
 - 去掉 `VOW_DICTATION_ENGINE` 后，环境变量只剩 `PORT`（与 A20 的配置收敛一致）。
 
 **代价**：失去「云端 ASR 不可用时的本地兜底」；已知悉并接受——该兜底质量不足以承担兜底职责。`keybd_event` 绑定层一并移除，若将来需要非 Unicode 的按键和弦注入须重新引入。
+
+### A22：运维脚本按语义域归位，根依赖随之收敛
+
+**决策**：`scripts/` 只保留**仓库级**脚本（`run-when-os-starts.ts` 开机自启、`recon/` 逆向记录）；其余按语义域下沉：
+
+| 脚本 | 迁移去向 | 依据 |
+|------|----------|------|
+| `portaudio-check.ts` | `packages/portaudio/src/smoke.test.ts` | 本质是该包的 E2E，改写成 vitest 用例，随 `pnpm test` 回归 |
+| `get-driver.ts` | `apps/server/scripts/` | 安装的是 VB-Cable（server 的运行时前置），且 `virtual-audio.ts` 的报错文案本就指向它 |
+| `pair.ts` | `apps/server/scripts/` | 跨包 import `apps/server/src/...` 的服务，靠 pnpm 依赖提升侥幸可用，本就属于 server |
+
+根 `package.json` **不再提供** `get-driver` / `portaudio-check` 转发命令——需要时直呼所在包：`pnpm --filter @vow/server get-driver`、`pnpm --filter @vow/portaudio test`。根上只保留真正跨包的命令（`dev` / `build` / `start` / `test` / `check` / `pair` / `run-when-os-starts`）。根 `devDependencies` 清理掉 5 项零引用或方向倒挂的依赖：`adm-zip` / `is-elevated`（随 get-driver 下沉为 server devDeps）、`opusscript`（全仓零引用）、`@vow/portaudio` / `ws`（只在 server 用，根上是反向依赖）。
+
+**理由**：
+- 脚本住在根、却 import 子包代码，是**依赖方向的倒挂**：根组件因此被迫声明 `@vow/portaudio` 等只被子包使用的依赖，才让脚本能解析。按语义下沉后，每份依赖都落在真正使用它的 package 里。
+- `portaudio-check` 从「手动冒烟脚本」升级为「自动回归用例」，并把「非 win32 / 无可用设备」处理成**跳过而非失败**，于是可安全纳入 `pnpm test`。
+- 枚举用例放宽为「只校验真实端点」：WASAPI 会返回形如「无名称 / 0 声道 / 0 采样率」的幽灵设备（实测本机 id=16），这是 PortAudio 既有行为，不应让回归测试因此误报。
+
+**代价**：跨包路径 `apps/server/scripts/` 下的脚本需自行上溯三级定位仓库根（已在两处显式 `resolve(__dirname, '..', '..', '..')` 并注释）；原 `portaudio-check` 命令已取消，改为 `pnpm --filter @vow/portaudio test`；若需向具体端点写正弦做听感验证，用 `PMC_SMOKE_TONE_MS=2000 pnpm --filter @vow/portaudio test`。
