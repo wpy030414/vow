@@ -5,8 +5,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { createServer as createHttpsServer } from 'node:https'
-import { audioRoutes } from './routes/audio'
-import { sseRoutes } from './routes/sse'
+import { createAudioRoutes } from './routes/audio'
+import { createSseRoutes } from './routes/sse'
 import { createKeyRoutes } from './routes/keys'
 import { sseHub } from './services/sse-hub'
 import { initVirtualAudio } from './services/virtual-audio'
@@ -63,8 +63,8 @@ app.use(
   createAuthMiddleware(() => tokenStore.token),
 )
 
-app.route('/api/sse', sseRoutes)
-app.route('/api/audio', audioRoutes)
+app.route('/api/sse', createSseRoutes({ appMode: appConfig.mode }))
+app.route('/api/audio', createAudioRoutes({ appMode: appConfig.mode }))
 app.route('/api/keys', createKeyRoutes())
 
 const clientDir = join(__dirname, 'client')
@@ -102,7 +102,8 @@ await virtualAudio.start()
 
 // ─── 听写联动接线 ───
 // 引擎抽象见 services/asr-dictation.ts；当前唯一实现是 iflytek-api（凭据 base64 内置，零配置）：
-// hold 按下开会话（消费 onAudioChunk 的 PCM）→ 松手收尾，最终文本经 typeText 打入焦点窗口。
+// codex-micro 形态下 hold 按下 + 「转文字」开启时激活；qwennote-eva 形态下由服务端
+// 策略强制恒随录音态（tap 翻转即开/收）。收尾后最终文本经 typeText 打入焦点窗口。
 // 将来新增渠道：在 asr-dictation 的 id 联合类型与注册表中登记即可，本处接线不变。
 
 const DICTATION_ENGINE_ID = 'iflytek-api' as const
@@ -150,7 +151,7 @@ sseHub.onDictationChange = (active, sessionId, reason) => {
 }
 
 console.log(
-  `Server starting on https://localhost:${PORT}（听写引擎：${DICTATION_ENGINE_ID}；虚拟麦克风：${appConfig.virtualAudio.enabled ? '开' : '关'}；录音落盘：${appConfig.recording.enabled ? '开' : '关'}）`,
+  `Server starting on https://localhost:${PORT}（前端形态：${appConfig.mode}${appConfig.mode === 'qwennote-eva' ? '——仅 Tap · 无耳返 · ASR 恒开' : ''}；听写引擎：${DICTATION_ENGINE_ID}；虚拟麦克风：${appConfig.virtualAudio.enabled ? '开' : '关'}；录音落盘：${appConfig.recording.enabled ? '开' : '关'}）`,
 )
 const { key, cert } = ensureCert(vowDir)
 serve({
