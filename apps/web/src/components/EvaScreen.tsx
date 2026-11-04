@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { cn } from '../lib/utils'
+import { useSaccade } from '../hooks/useSaccade'
 
 interface EvaScreenProps {
   connecting: boolean
@@ -266,10 +267,17 @@ function eyeTransform(base: Base, transient: Transient | null, level: number): s
   }
 }
 
-/** 过渡曲线：眨眼用快过渡（官方 4 帧合上），其余用带回弹的缓动 */
+/**
+ * 过渡曲线：弹簧式缓动（spring）。
+ * - 眨眼/挤眼：合上要快（90ms ease-in）；
+ * - 其余动作：260ms 轻弹，终点略微冲过再回落，比 ease 更有"肉感"。
+ */
+const SPRING = 'cubic-bezier(0.34, 1.56, 0.64, 1)'
+const SPRING_SOFT = 'cubic-bezier(0.25, 1.3, 0.5, 1)'
+
 function eyeTransition(transient: Transient | null): string {
   if (transient === 'blink' || transient === 'wink') return 'transform 90ms ease-in'
-  return 'transform 240ms cubic-bezier(0.34, 1.3, 0.64, 1)'
+  return `transform 260ms ${SPRING}`
 }
 
 /**
@@ -347,6 +355,8 @@ export function EvaScreen({
   shakeTick,
 }: EvaScreenProps) {
   const { active, play } = useTransient()
+  /** 视线跟随：按下时的归一化偏移（-0.5 ~ 0.5），松手后回零 */
+  const [gaze, setGaze] = useState({ x: 0, y: 0 })
 
   // ── 基底：会话状态决定（常驻） ──
   const base: Base = !connected
@@ -388,11 +398,38 @@ export function EvaScreen({
   // ── 自主微动作：仅基底可睁眼时（idle / listening） ──
   useIdleBehavior(base === 'idle' || base === 'listening', play)
 
-  const handleTap = useCallback(() => {
-    if (!connected) onConnect()
-    else onToggleRecording()
-  }, [connected, onConnect, onToggleRecording])
+  // ── 微眼震：待机时持续轻微游移。眨眼/情绪动作期间关掉，避免与主动作打架 ──
+  const saccade = useSaccade(!active && (base === 'idle' || base === 'listening'))
 
+  const handleTap = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      // 视线跟随：按下的位置决定眼睛朝哪边偏
+      const r = e.currentTarget.getBoundingClientRect()
+      const nx = (e.clientX - r.left) / r.width - 0.5
+      const ny = (e.clientY - r.top) / r.height - 0.5
+      setGaze({ x: Math.max(-0.5, Math.min(0.5, nx)), y: Math.max(-0.5, Math.min(0.5, ny)) })
+
+      if (!connected) onConnect()
+      else onToggleRecording()
+    },
+    [connected, onConnect, onToggleRecording],
+  )
+
+  /** 松手：视线回正，由注视层的 CSS 弹簧过渡平滑带回 */
+  const handleRelease = useCallback(() => {
+    setGaze({ x: 0, y: 0 })
+  }, [])
+
+  // ── 注视层：视线跟随 + 微眼震，叠加在姿态层之外 ──
+  // 两层分离的意义：眨眼只动姿态层，视线偏移只动注视层，互不覆盖
+  const gazeX = gaze.x * 16 + saccade.x
+  const gazeY = gaze.y * 10 + saccade.y
+  const gazeStyle: CSSProperties = {
+    transform: `translate(${gazeX.toFixed(2)}px, ${gazeY.toFixed(2)}px)`,
+    transition: `transform 320ms ${SPRING_SOFT}`,
+  }
+
+  // ── 姿态层：眨眼/眯眼/挤眼等形状变化 ──
   const transform = eyeTransform(base, active, audioLevel)
   const transition = eyeTransition(active)
   // 有些状态不画胶囊眼睛，改由独立符号层表达：
@@ -453,6 +490,9 @@ export function EvaScreen({
         type="button"
         aria-label={connected ? (recording ? 'Stop recording' : 'Start recording') : 'Reconnect'}
         onPointerDown={handleTap}
+        onPointerUp={handleRelease}
+        onPointerCancel={handleRelease}
+        onPointerLeave={handleRelease}
         style={{ touchAction: 'none' }}
         className="absolute inset-0 h-full w-full cursor-pointer focus:outline-none"
       />
@@ -470,84 +510,87 @@ export function EvaScreen({
               aria-hidden="true"
               style={{ overflow: 'visible' }}
             >
-              {/* 头部组（点头等整体位移在此生效） */}
-              <g style={headStyle}>
-                {(['left', 'right'] as const).map((side) => {
-                  const style = eyeStyleFor()
-                  const cx = EYE_CX + (side === 'left' ? -EYE_DX : EYE_DX)
-                  return (
-                    // 荧光晕与眼睛同在一个 g：共用 transform，晕随眼睛尺寸同帧缩放
-                    <g key={side} style={style}>
-                      {/* 荧光晕分两套，按开心态交叉淡出——晕的尺寸必须跟着形状走，
+              {/* 注视层：视线跟随 + 微眼震，只平移不参与形状变化 */}
+              <g style={gazeStyle}>
+                {/* 头部组（点头等整体位移在此生效） */}
+                <g style={headStyle}>
+                  {(['left', 'right'] as const).map((side) => {
+                    const style = eyeStyleFor()
+                    const cx = EYE_CX + (side === 'left' ? -EYE_DX : EYE_DX)
+                    return (
+                      // 荧光晕与眼睛同在一个 g：共用 transform，晕随眼睛尺寸同帧缩放
+                      <g key={side} style={style}>
+                        {/* 荧光晕分两套，按开心态交叉淡出——晕的尺寸必须跟着形状走，
                           否则月牙里会留一圈胶囊大小的残影：
                             常规态 = 眼睛外扩 GLOW_PAD 的胶囊矩形；
                             开心态 = 月牙外扩 GLOW_PAD（同色描边 GLOW_PAD*2 后再模糊，
                             描边居中扩边界，外侧正好长胖 GLOW_PAD，与胶囊那套等量） */}
-                      <rect
-                        x={cx - EYE_W / 2 - GLOW_PAD}
-                        y={EYE_CY - EYE_H / 2 - GLOW_PAD}
-                        width={EYE_W + GLOW_PAD * 2}
-                        height={EYE_H + GLOW_PAD * 2}
-                        rx={EYE_R + GLOW_PAD}
-                        fill={EYE_GREEN}
-                        filter="url(#evaGlow)"
-                        style={{
-                          opacity: happy ? 0 : glowOpacity,
-                          transition: 'opacity 200ms ease',
-                        }}
-                      />
-                      <path
-                        d={happyPath(cx)}
-                        fill={EYE_GREEN}
-                        stroke={EYE_GREEN}
-                        strokeWidth={GLOW_PAD * 2}
-                        filter="url(#evaGlow)"
-                        style={{
-                          opacity: happy ? glowOpacity : 0,
-                          transition: 'opacity 200ms ease',
-                        }}
-                      />
-                      <path
-                        d={capsulePath(cx)}
-                        fill={EYE_GREEN}
-                        style={{
-                          opacity: happy ? 0 : 1,
-                          transition: 'opacity 160ms ease',
-                        }}
-                      />
-                      {/* 开心：形状换成月牙，与胶囊交叉淡出 */}
-                      <path
-                        d={happyPath(cx)}
-                        fill={EYE_GREEN}
-                        style={{
-                          opacity: happy ? 1 : 0,
-                          transition: 'opacity 200ms ease',
-                        }}
-                      />
-                    </g>
-                  )
-                })}
-                {/* 符号层：`> <` 挤眼 / `X X` 掉线，与眼睛交叉淡出 */}
-                <WinceSymbol
-                  cx={EYE_CX - EYE_DX}
-                  side="left"
-                  opacity={symbol === 'wince' ? 1 : 0}
-                />
-                <WinceSymbol
-                  cx={EYE_CX + EYE_DX}
-                  side="right"
-                  opacity={symbol === 'wince' ? 1 : 0}
-                />
-                <CrossSymbol
-                  cx={EYE_CX - EYE_DX}
-                  side="left"
-                  opacity={symbol === 'cross' ? 1 : 0}
-                />
-                <CrossSymbol
-                  cx={EYE_CX + EYE_DX}
-                  side="right"
-                  opacity={symbol === 'cross' ? 1 : 0}
-                />
+                        <rect
+                          x={cx - EYE_W / 2 - GLOW_PAD}
+                          y={EYE_CY - EYE_H / 2 - GLOW_PAD}
+                          width={EYE_W + GLOW_PAD * 2}
+                          height={EYE_H + GLOW_PAD * 2}
+                          rx={EYE_R + GLOW_PAD}
+                          fill={EYE_GREEN}
+                          filter="url(#evaGlow)"
+                          style={{
+                            opacity: happy ? 0 : glowOpacity,
+                            transition: 'opacity 200ms ease',
+                          }}
+                        />
+                        <path
+                          d={happyPath(cx)}
+                          fill={EYE_GREEN}
+                          stroke={EYE_GREEN}
+                          strokeWidth={GLOW_PAD * 2}
+                          filter="url(#evaGlow)"
+                          style={{
+                            opacity: happy ? glowOpacity : 0,
+                            transition: 'opacity 200ms ease',
+                          }}
+                        />
+                        <path
+                          d={capsulePath(cx)}
+                          fill={EYE_GREEN}
+                          style={{
+                            opacity: happy ? 0 : 1,
+                            transition: 'opacity 160ms ease',
+                          }}
+                        />
+                        {/* 开心：形状换成月牙，与胶囊交叉淡出 */}
+                        <path
+                          d={happyPath(cx)}
+                          fill={EYE_GREEN}
+                          style={{
+                            opacity: happy ? 1 : 0,
+                            transition: 'opacity 200ms ease',
+                          }}
+                        />
+                      </g>
+                    )
+                  })}
+                  {/* 符号层：`> <` 挤眼 / `X X` 掉线，与眼睛交叉淡出 */}
+                  <WinceSymbol
+                    cx={EYE_CX - EYE_DX}
+                    side="left"
+                    opacity={symbol === 'wince' ? 1 : 0}
+                  />
+                  <WinceSymbol
+                    cx={EYE_CX + EYE_DX}
+                    side="right"
+                    opacity={symbol === 'wince' ? 1 : 0}
+                  />
+                  <CrossSymbol
+                    cx={EYE_CX - EYE_DX}
+                    side="left"
+                    opacity={symbol === 'cross' ? 1 : 0}
+                  />
+                  <CrossSymbol
+                    cx={EYE_CX + EYE_DX}
+                    side="right"
+                    opacity={symbol === 'cross' ? 1 : 0}
+                  />
+                </g>
               </g>
             </svg>
           </div>
