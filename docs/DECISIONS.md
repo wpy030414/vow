@@ -65,6 +65,7 @@
 
 ### A11：语音转文字双引擎——iflytek-api 私有协议直连（默认）+ Win+H 保底
 
+> **注**：Win+H 保底引擎已于 A21 移除（识别质量过低、无通用价值）；本记录保留作历史背景，现行实现以 A21 为准。
 
 **决策**：hold + 「转文字」触发听写。默认 `iflytek-api`：服务端直连讯飞私有 ASR（签名握手 + raw PCM16@16k WS 推流），终稿经 SendInput（KEYEVENTF_UNICODE）打入焦点窗口；凭据（apiKey/apiSecret/appId）以 base64 集成于源码，开箱即用、env 可逐字段覆盖；注入 `VOW_DICTATION_ENGINE=win-dictation` 才切换到 `win-dictation`（koffi → keybd_event 注入 Win+H，toggle 语义）。
 **理由**：
@@ -158,3 +159,21 @@
 - 宿主系统声回传（WASAPI loopback）与 VB-Cable **无任何依赖关系**（`loopback-capture` 是 N-API 预编译包，直抓默认播放设备混音），因此恒开启、不设开关——不为永远没人会关的功能制造配置债。附带收益：关闭虚拟麦克风后，「默认播放设备为 CABLE In 导致耳返数字回环」的风险从根上消失。
 - 环境变量配置在个人工具里会退化成「在哪设的、什么时候设的」的考古现场；`config.yml` 可读、可 diff、可版本化、可写注释。仅保留 `PORT` 是因为端口冲突/临时换端口需要**不改文件**就能覆盖的场景。
 **代价**：仅提供 `config.example.yml` 模板，实际 `config.yml` 被 gitignore——本地端口/开关改动不会污染 working tree，代价是新机器需手动复制一次模板；安装 VB-Cable 后仍需重启系统才能让端点出现（外部驱动固有约束，与本项目无关）。
+
+### A21：移除 Win+H 系统听写，保留可插拔的听写引擎接口
+
+**决策**：删除 `win-dictation` 引擎（`services/dictation.ts` 及其测试、`win32-keys` 中仅供 Win+H 使用的 `keybd_event` 和弦层与 `VK_H`/`VK_LWIN` 常量）。新增 `services/asr-dictation.ts` 定义**不含具体实现的引擎抽象**：
+
+- `DictationEngine`：`start / feed / stop / cancel / isActive` 会话契约
+- `DictationEngineHooks`：最终文本交付（当前由 `typeText` 经 SendInput 注入焦点窗口）
+- `DictationEngineId`（`packages/shared/types.ts`）+ `DICTATION_ENGINES`（`packages/shared/constants.ts`）：渠道清单与默认值同源
+- `createDictationEngine(id, hooks, registry)`：按注册表派发；**未登记直接抛错**，不静默降级
+
+当前唯一实现 `iflytek-api` 改为以工厂形式提供（`iflytekEngineFactory`）。辅助键（退格/回车）随之从 `keybd_event` 迁移到 SendInput 的虚拟键路径，与文本注入共用同一底层。
+
+**理由**：
+- Win+H 识别质量过低，且在非中文/非 Win11 输入法环境（要求系统听写可用、听写录音设备手动指向虚拟麦克风）几乎不可复制——它是个「为保底而保底」的分支，实际从未被采用，却持续拖着一个 toggle 语义引擎、一套按键和弦注入、一份 env 开关和一组专属测试。
+- 引擎接口要留下，因为它承载的是**真正可复用的契约**（会话生命周期 + 音频推入 + 终稿交付），与具体渠道无关；后续接其它 ASR 只需实现接口并在注册表登记，接线层（`index.ts`）零改动。
+- 去掉 `VOW_DICTATION_ENGINE` 后，环境变量只剩 `PORT`（与 A20 的配置收敛一致）。
+
+**代价**：失去「云端 ASR 不可用时的本地兜底」；已知悉并接受——该兜底质量不足以承担兜底职责。`keybd_event` 绑定层一并移除，若将来需要非 Unicode 的按键和弦注入须重新引入。

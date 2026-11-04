@@ -46,8 +46,8 @@
 
 ```
 手机按下（hold + 转文字开）→ POST /api/sse/state {dictation:true}
-  → SSEHub 翻转检测 → 默认 iflytek-api（凭据 base64 内置）：开 ASR 会话（PCM 经 16k 重采样 + 80ms 分帧直连讯飞 WS）
-                      VOW_DICTATION_ENGINE=win-dictation 才注入 Win+H（经虚拟麦克风回流的保底路径）
+  → SSEHub 翻转检测 → 听写引擎（services/asr-dictation.ts 抽象 + 注册表派发）
+                      当前唯一实现 iflytek-api（凭据 base64 内置）：开 ASR 会话（PCM 经 16k 重采样 + 80ms 分帧直连讯飞 WS）
   → 转写结果不下发手机端（仅宿主机控制台日志）
   松开 → ASR 尾帧 status:2 收尾 → 终稿 SendInput（Unicode 注入）打入焦点窗口
   页面关闭/TTL 回收/服务停止 → 强制释放
@@ -57,7 +57,7 @@
 
 ```
 手机点按 ×（退格）/ ✓（回车）→ POST /api/keys/press {key:'backspace'|'enter'}
-  → koffi → user32 keybd_event 注入焦点窗口
+  → koffi → user32 SendInput 注入焦点窗口（与文本注入共用底层）
   录音中前端禁用（淡化）——避免与听写收尾的 SendInput 文本注入竞争焦点窗口
 ```
 
@@ -86,10 +86,10 @@
 | `services/pairing-qr.ts` | 终端配对二维码打印（qrcode-terminal 动态加载，缺失降级纯链接） |
 | `services/sse-hub.ts` | 会话池、心跳/TTL 回收、事件广播 |
 | `services/virtual-audio.ts` | 虚拟音频设备（输入写入 = @vow/portaudio(koffi→PortAudio, worker 线程)；环回输出捕获） |
-| `services/dictation.ts` | 语音转文字联动——Win+H 引擎（按键注入 + 翻转去重；env 显式启用） |
-| `services/win32-keys.ts` | 原生按键注入底层（koffi → user32 keybd_event，dictation/typing 共用） |
+| `services/asr-dictation.ts` | 听写引擎抽象——引擎接口 / hooks / 注册表派发（不含具体实现） |
+| `services/win32-keys.ts` | 原生注入底层（koffi → user32 SendInput；辅助键与 Unicode 文本共用） |
 | `services/typing.ts` | 转写文本注入——KEYEVENTF_UNICODE 逐码元打入焦点窗口（绕过输入法） |
-| `services/iflytek-asr.ts` | 讯飞私有 ASR 直连（签名/重采样/分帧/WS 会话/听写门面，协议见 scripts/recon/FINDINGS.md） |
+| `services/iflytek-asr.ts` | 讯飞私有 ASR 直连（签名/重采样/分帧/WS 会话）+ 引擎工厂实现，协议见 scripts/recon/FINDINGS.md |
 | `services/tls-cert.ts` | 自签证书生成（HTTPS 安全上下文） |
 
 ### apps/web/

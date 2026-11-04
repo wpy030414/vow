@@ -3,7 +3,7 @@
 import { Hono } from 'hono'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { sseHub } from '../services/sse-hub'
-import { resolveEngineConfig } from '../services/dictation'
+import { DEFAULT_DICTATION_ENGINE } from '@vow/shared/constants'
 import type {
   ConnectRequest,
   ConnectResponse,
@@ -137,7 +137,7 @@ sseRoutes.post('/state', async (c) => {
 sseRoutes.get('/info', (c) => {
   const info: ConnectionInfo = {
     ...sseHub.getConnectionInfo(),
-    dictationEngine: resolveEngineConfig().engine,
+    dictationEngine: DEFAULT_DICTATION_ENGINE,
   }
   return c.json(info)
 })

@@ -92,14 +92,22 @@ export interface KeyPressResponse {
   ok: boolean
 }
 
+// ─── 听写引擎 ───
+
+/**
+ * 听写引擎渠道标识。
+ * 新增渠道：在此追加成员 + 在 shared/constants 的 DICTATION_ENGINES 中登记 + 在 server 注册表中实现。
+ */
+export type DictationEngineId = 'iflytek-api'
+
 // ─── 连接信息 ───
 
 /** 服务端连接概览 */
 export interface ConnectionInfo {
   connectedCount: number
   sessions: string[]
-  /** 当前生效的听写引擎（诊断用；默认 iflytek-api，env 注入 VOW_DICTATION_ENGINE=win-dictation 切换） */
-  dictationEngine: 'iflytek-api' | 'win-dictation'
+  /** 当前生效的听写引擎（诊断用）。渠道列表见 shared/constants 的 DICTATION_ENGINES */
+  dictationEngine: DictationEngineId
 }
 
 // ─── 虚拟音频设备 ───

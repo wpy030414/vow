@@ -1,5 +1,5 @@
-// win32-keys — 原生按键注入底层（koffi → user32）
-// dictation（快捷键，keybd_event）与 typing（Unicode 文本，SendInput）共用
+// win32-keys — 原生注入底层（koffi → user32）
+// 辅助键（backspace / enter）与 Unicode 文本注入，均走 SendInput。
 
 import { createRequire } from 'node:module'
 
@@ -9,18 +9,9 @@ const require = createRequire(import.meta.url)
 
 export const KEYEVENTF_KEYUP = 0x0002
 export const KEYEVENTF_UNICODE = 0x0004
-export const VK_LWIN = 0x5b
-export const VK_H = 0x48
 export const VK_BACK = 0x08
 export const VK_RETURN = 0x0d
 const INPUT_KEYBOARD = 1
-
-export type KeybdEventFn = (
-  bVk: number,
-  bScan: number,
-  dwFlags: number,
-  dwExtraInfo: number,
-) => void
 
 // ─── koffi / user32 加载（进程内缓存）───
 
@@ -46,49 +37,6 @@ function loadUser32(): User32Handles | null {
     user32Cache = null
   }
   return user32Cache
-}
-
-// ─── 快捷键和弦（keybd_event；VK 码 8 位足够）───
-
-let cachedKeybd: KeybdEventFn | null | undefined
-
-export function loadKeybdEvent(): KeybdEventFn | null {
-  if (cachedKeybd !== undefined) return cachedKeybd
-  const u = loadUser32()
-  if (!u) {
-    cachedKeybd = null
-    return null
-  }
-  try {
-    cachedKeybd = u.user32.func(
-      'void __stdcall keybd_event(uint8_t bVk, uint8_t bScan, uint32_t dwFlags, uintptr_t dwExtraInfo)',
-    ) as KeybdEventFn
-  } catch (err) {
-    console.warn('[win32-keys] keybd_event 绑定失败：', err instanceof Error ? err.message : err)
-    cachedKeybd = null
-  }
-  return cachedKeybd
-}
-
-export interface NativeKeys {
-  supported: boolean
-  /** 注入一次按键（可选 Win 修饰键和弦），自动配对按下/抬起 */
-  chord(winModifier: boolean, vk: number): void
-}
-
-/** 生产实现：koffi + user32 keybd_event（测试传入替身） */
-export function loadNativeKeys(): NativeKeys {
-  const keybd = loadKeybdEvent()
-  if (!keybd) return { supported: false, chord: () => {} }
-  return {
-    supported: true,
-    chord(winModifier, vk) {
-      if (winModifier) keybd(VK_LWIN, 0, 0, 0)
-      keybd(vk, 0, 0, 0)
-      keybd(vk, 0, KEYEVENTF_KEYUP, 0)
-      if (winModifier) keybd(VK_LWIN, 0, KEYEVENTF_KEYUP, 0)
-    },
-  }
 }
 
 // ─── Unicode 文本注入（SendInput）───

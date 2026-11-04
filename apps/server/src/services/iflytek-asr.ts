@@ -5,6 +5,7 @@
 
 import crypto from 'node:crypto'
 import WebSocket, { type RawData } from 'ws'
+import type { DictationEngine, DictationEngineHooks } from './asr-dictation'
 
 export const IFLYTEK_HOST = '100ime-iat-api.xfyun.cn'
 export const IFLYTEK_PATH = '/v2/iat'
@@ -324,27 +325,30 @@ export function createAsrSession(cfg: AsrConfig, opts: CreateAsrSessionOptions =
   }
 }
 
-// ─── 听写门面（供 index.ts 接线）───
+// ─── 听写引擎实现（接口见 services/asr-dictation.ts）───
 
-export interface AsrDictationHooks {
-  /** 最终文本——打字注入在此完成 */
-  onFinalText: (text: string) => void | Promise<void>
+/** 讯飞引擎的构造参数——凭据 + 可注入的会话工厂（测试用） */
+export interface IflytekEngineOptions {
+  cfg: AsrConfig
+  createSession?: typeof createAsrSession
 }
 
-export interface AsrDictation {
-  start(): void
-  feed(base64Pcm: string, sampleRate: number): void
-  /** 松手收尾：等最终文本并触发 onFinalText */
-  stop(): Promise<void>
-  cancel(): void
-  isActive(): boolean
+/**
+ * 构造讯飞引擎工厂：给定引擎 hooks，返回一个实现 {@link DictationEngine} 的工厂。
+ * index.ts 把它登记进引擎注册表，当前是唯一内置实现。
+ */
+export function iflytekEngineFactory(
+  options: IflytekEngineOptions,
+): (hooks: DictationEngineHooks) => DictationEngine {
+  return (hooks) =>
+    createAsrDictation(options.cfg, hooks, options.createSession ?? createAsrSession)
 }
 
 export function createAsrDictation(
   cfg: AsrConfig,
-  hooks: AsrDictationHooks,
+  hooks: DictationEngineHooks,
   createSession: typeof createAsrSession = createAsrSession,
-): AsrDictation {
+): DictationEngine {
   let session: AsrSession | null = null
 
   return {

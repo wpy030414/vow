@@ -10,14 +10,13 @@ import { sseRoutes } from './routes/sse'
 import { createKeyRoutes } from './routes/keys'
 import { sseHub } from './services/sse-hub'
 import { initVirtualAudio } from './services/virtual-audio'
-import { createDictation, resolveEngineConfig } from './services/dictation'
-import { loadNativeKeys } from './services/win32-keys'
-import { createAsrDictation, resolveAsrConfig, type AsrDictation } from './services/iflytek-asr'
+import { loadConfig } from './services/config'
+import { createDictationEngine, type DictationEngine } from './services/asr-dictation'
+import { iflytekEngineFactory, resolveAsrConfig } from './services/iflytek-asr'
 import { typeText } from './services/typing'
 import { ensureCert } from './services/tls-cert'
 import { createAuthMiddleware, createTokenStore } from './services/auth'
 import { printPairingCode } from './services/pairing-qr'
-import { loadConfig } from './services/config'
 import { createPairRoutes } from './routes/pair'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -35,8 +34,8 @@ function findRepoRoot(start: string): string {
 }
 
 const repoRoot = findRepoRoot(__dirname)
-// 运行期配置全部来自 <repoRoot>/config.yml（A20）；环境变量仅 PORT 一个逃生口
 
+// 运行期配置全部来自 <repoRoot>/config.yml（A16）；环境变量仅 PORT 一个逃生口
 const appConfig = loadConfig({ repoRoot })
 const PORT = appConfig.port
 
@@ -97,19 +96,22 @@ sseHub.start()
 await virtualAudio.start()
 
 // ─── 听写联动接线 ───
-// 默认 iflytek-api（凭据 base64 内置，零配置）：hold 按下开 ASR 会话（消费 onAudioChunk 的 PCM）
-// → 松手收尾打字；注入 VOW_DICTATION_ENGINE=win-dictation 才切换到 Win+H 快捷键注入（toggle 引擎）
+// 引擎抽象见 services/asr-dictation.ts；当前唯一实现是 iflytek-api（凭据 base64 内置，零配置）：
+// hold 按下开会话（消费 onAudioChunk 的 PCM）→ 松手收尾，最终文本经 typeText 打入焦点窗口。
+// 将来新增渠道：在 asr-dictation 的 id 联合类型与注册表中登记即可，本处接线不变。
 
-const engineCfg = resolveEngineConfig()
-const asrCtl: AsrDictation | null =
-  engineCfg.engine === 'iflytek-api'
-    ? createAsrDictation(resolveAsrConfig(), {
-        onFinalText: async (text) => {
-          await typeText(text)
-        },
-      })
-    : null
-const dictation = createDictation(loadNativeKeys(), engineCfg)
+const DICTATION_ENGINE_ID = 'iflytek-api' as const
+const dictation: DictationEngine = createDictationEngine(
+  DICTATION_ENGINE_ID,
+  {
+    onFinalText: async (text) => {
+      await typeText(text)
+    },
+  },
+  {
+    'iflytek-api': iflytekEngineFactory({ cfg: resolveAsrConfig() }),
+  },
+)
 
 // 上行音频接线：会话就绪（新建或复活）时挂载 onAudioChunk——
 // 虚拟麦克风写入 + ASR 消费（ASR 未激活时内部 no-op）。
@@ -118,7 +120,7 @@ const dictation = createDictation(loadNativeKeys(), engineCfg)
 sseHub.onSessionInit = (session) => {
   session.onAudioChunk = ({ data, sampleRate }) => {
     virtualAudio.writeInputPCM({ data, sampleRate })
-    asrCtl?.feed(data, sampleRate)
+    dictation.feed(data, sampleRate)
   }
 }
 
@@ -126,18 +128,18 @@ virtualAudio.setOutputCallback((pcm: Buffer) => {
   sseHub.broadcastOutputAudio(pcm)
 })
 
-// 听写联动：hold 按下（前端开「转文字」）→ 开听写；松开或会话销毁（页面关闭/断线/TTL 回收）→ 收尾
+// 听写联动：hold 按下（前端开「转文字」）→ 开会话；松开或会话销毁（页面关闭/断线/TTL 回收）→ 收尾
 sseHub.onDictationChange = (active, sessionId, reason) => {
-  if (asrCtl) {
-    if (active) asrCtl.start()
-    else void asrCtl.stop()
+  if (active) {
+    dictation.start()
   } else {
-    void dictation.setDesired(active, `${reason}:${sessionId}`)
+    console.log(`[ASR] 收尾（${reason}:${sessionId}）`)
+    void dictation.stop()
   }
 }
 
 console.log(
-  `Server starting on https://localhost:${PORT}（听写引擎：${engineCfg.engine}；虚拟麦克风：${appConfig.virtualAudio.enabled ? '开' : '关'}）`,
+  `Server starting on https://localhost:${PORT}（听写引擎：${DICTATION_ENGINE_ID}；虚拟麦克风：${appConfig.virtualAudio.enabled ? '开' : '关'}）`,
 )
 const { key, cert } = ensureCert(vowDir)
 serve({
@@ -156,8 +158,7 @@ if (existsSync(clientDir)) {
 
 const shutdown = async () => {
   console.log('\nShutting down...')
-  asrCtl?.cancel()
-  dictation.releaseNow('shutdown')
+  dictation.cancel()
   // PortAudio worker 宽限（其内部另有 2s 上限），超时即强制退出
   await Promise.race([virtualAudio.stop(), new Promise((r) => setTimeout(r, 1500))])
   sseHub.stop()

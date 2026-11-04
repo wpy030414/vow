@@ -79,3 +79,11 @@ export const VB_CABLE_DOWNLOAD_URL =
 
 /** 安装后等待设备出现的超时（毫秒） */
 export const VB_CABLE_INSTALL_TIMEOUT_MS = 30_000
+
+// ─── 听写引擎 ───
+
+/** 已实现的听写引擎渠道（新增渠道在此追加） */
+export const DICTATION_ENGINES = ['iflytek-api'] as const
+
+/** 默认听写引擎 */
+export const DEFAULT_DICTATION_ENGINE = 'iflytek-api' as const

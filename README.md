@@ -131,7 +131,7 @@ pnpm pair --rotate         # 轮换令牌——所有已配对设备立即失效
 - **虚拟麦克风需装 VB-Cable 并重启**，无法免依赖运行；不启用该功能时无此前提
 - **iOS 扬声器路由**：`navigator.audioSession` 需 iOS 16.4+；更低的版本上，一旦用过麦克风，外放会被系统锁在「听筒」（网页层不可解）
 - **后台续传分平台**：Android Chrome / 桌面 Chrome 可在后台持续采集与播放；iOS Safari 后台会被系统挂起并收回麦克风，回前台自动恢复（后台期间音频不进上行链路）
-- **听写为私有协议**：`iflytek-api` 是逆向实现的讯飞私有 ASR 直连，存在被服务端升级破坏的风险（用 `VOW_DICTATION_ENGINE=win-dictation` 一行 env 可切回 Win+H 保底引擎）
+- **听写为私有协议**：`iflytek-api` 是逆向实现的讯飞私有 ASR 直连，存在被服务端升级破坏的风险；听写引擎已抽象为可插拔接口（`services/asr-dictation.ts`），后续可另接渠道
 - 讯飞凭据为设备级内置，仅供本机个人使用
 
 ## 项目结构
