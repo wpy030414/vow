@@ -329,6 +329,8 @@ export function App() {
         audioLevel={audioLevel}
         error={micError}
         onToggleRecording={handleEvaToggleRecording}
+        // 传感器授权必须在手势上下文内同步发起；落锁发生在 1s 后的定时器里，早已脱离手势
+        onPressStart={shake.arm}
         onConnect={() => {
           unlockOutputAudio()
           void connect()

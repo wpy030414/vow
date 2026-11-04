@@ -98,41 +98,54 @@
   animation: eva-breathe 3.8s ease-in-out infinite;
 }
 
-/* ─── qwennote-eva 屏幕辉光：顺窗口形状向内发散 ───
-   不画边框、不做硬描边——光从视口四边朝屏心连续衰减，形状天然跟随窗口。
-   四层由近及远叠出光学式衰减（贴边最亮、向屏心渐隐、角部自然更亮）。
-   注意：**不要**加 inset 0 0 0 Npx 这类实心描边——它会让第一像素到第二像素
-   断崖式跌落，视觉上就是一圈被切开的硬边。 */
+/* ─── qwennote-eva 激活辉光：绕屏旋转的彩色光圈 ───
+   光圈的尺寸与扩散范围与原单色辉光一致：贴边最亮、向内几十像素内衰减干净，
+   四条边取并集 → 形状天然跟随窗口。变化的只有颜色与「它在转」：
+   沿屏幕一周是绿 → 青 → 蓝 → 紫 → 品红的连续色带，并缓慢绕屏心流转。
+   做法：conic-gradient 铺满整屏，再用四条向内衰减的线性遮罩取并集，只留贴边一圈。
+   @property 让渐变角度可插值——background 的角度本身不可动画。 */
 
-@keyframes eva-glow-breathe {
-  0%,
-  100% {
-    box-shadow:
-      inset 0 0 6px 0 rgba(99, 255, 180, 0.5),
-      inset 0 0 22px 2px rgba(99, 255, 180, 0.32),
-      inset 0 0 70px 6px rgba(2, 255, 183, 0.18),
-      inset 0 0 160px 16px rgba(53, 230, 192, 0.08);
-  }
-  50% {
-    box-shadow:
-      inset 0 0 6px 0 rgba(53, 230, 192, 0.5),
-      inset 0 0 22px 2px rgba(53, 230, 192, 0.32),
-      inset 0 0 70px 6px rgba(99, 255, 180, 0.18),
-      inset 0 0 160px 16px rgba(2, 255, 183, 0.08);
+@property --eva-aurora-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes eva-aurora-spin {
+  to {
+    --eva-aurora-angle: 360deg;
   }
 }
 
-/* 向内发散：inset 阴影只画在盒子内侧，形状 = 视口矩形 */
 .eva-glow {
-  box-shadow:
-    inset 0 0 6px 0 rgba(99, 255, 180, 0.5),
-    inset 0 0 22px 2px rgba(99, 255, 180, 0.32),
-    inset 0 0 70px 6px rgba(2, 255, 183, 0.18),
-    inset 0 0 160px 16px rgba(53, 230, 192, 0.08);
-  animation: eva-glow-breathe 6s ease-in-out infinite;
+  /* 单条边的向内衰减包络。原单色辉光是四层 inset 阴影叠加，可感知范围只有几十像素；
+     单色改成锥形渐变后若照搬那四层的名义半径（最远 160px），彩色会把整片余晖都染出来，
+     看上去比原来大一圈。这里用更陡的曲线把**可见**范围收回到原图大小。 */
+  --eva-edge: rgba(0, 0, 0, 0.65) 0, rgba(0, 0, 0, 0.38) 4px, rgba(0, 0, 0, 0.18) 10px,
+    rgba(0, 0, 0, 0.07) 22px, rgba(0, 0, 0, 0.02) 42px, transparent 72px;
+
+  background: conic-gradient(
+    from var(--eva-aurora-angle) at 50% 50%,
+    #63ffb4,
+    #3fd4ff,
+    #6f9bff,
+    #a97bff,
+    #ff6ee0,
+    #a97bff,
+    #6f9bff,
+    #3fd4ff,
+    #63ffb4
+  );
+  -webkit-mask-image:
+    linear-gradient(to bottom, var(--eva-edge)), linear-gradient(to top, var(--eva-edge)),
+    linear-gradient(to right, var(--eva-edge)), linear-gradient(to left, var(--eva-edge));
+  mask-image:
+    linear-gradient(to bottom, var(--eva-edge)), linear-gradient(to top, var(--eva-edge)),
+    linear-gradient(to right, var(--eva-edge)), linear-gradient(to left, var(--eva-edge));
+  animation: eva-aurora-spin 12s linear infinite;
 }
 
-/* 尊重系统「减少动态效果」：辉光仍可见（状态可辨识），只是不再呼吸 */
+/* 尊重系统「减少动态效果」：光圈仍在，只是不转 */
 @media (prefers-reduced-motion: reduce) {
   .eva-glow {
     animation: none;

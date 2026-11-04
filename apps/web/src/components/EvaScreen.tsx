@@ -14,10 +14,11 @@
 // 几何与表情语义来自千问 App 语音表情库：双眼中心距 ±70、单眼 80×120 r40
 // （官方 60×120，全屏加宽）、眨眼 = 宽扁线、开心 = 眯成月牙（官方原为 60×50 眯眼
 // 胶囊，本项目改用「上沿弯、下沿平」的非等厚月牙，见 happyPath）、难过 = 半睁宽眼
-// + 下移。主色荧光绿 #63ffb4（钉钉 AI 系 celebrate 眼部色）。
+// + 下移。主色荧光绿 #63ffb4（钉钉 AI 系 celebrate 眼部色），激活态渐变为荧光蓝；
+// 边光在激活时是一圈绕屏缓慢旋转的彩色光圈，尺寸与扩散范围保持不变。
 //
 // ── 形态约束（服务端强制）──
-// 仅 Tap（整屏轻触切换录音）、无控制栏、无耳返与「转文字」开关（ASR 恒随录音）。
+// 仅 Tap（整屏长按 1 秒落锁进入/退出）、无控制栏、无耳返与「转文字」开关（ASR 恒随录音）。
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { cn } from '../lib/utils'
@@ -30,8 +31,10 @@ interface EvaScreenProps {
   audioLevel: number
   /** 麦克风错误（getUserMedia 拒绝等）——底部细字展示 */
   error: string | null
-  /** 整屏轻触：已连接时切换录音（tap 语义）。调用方负责在同一次手势里申请传感器权限 */
+  /** 长按落锁：按住满 1 秒切换录音（tap 语义）。落锁时刻由本组件判定，调用方只管执行 */
   onToggleRecording: () => void
+  /** 按下瞬间（仍在用户手势上下文内）——传感器授权这类必须同步发起的准备放这里 */
+  onPressStart: () => void
   /** 掉线时轻触重连 */
   onConnect: () => void
   /** 摇晃计数：每次手机摇晃 +1，变化即播放挤眼（App 层统一监听传感器） */
@@ -56,8 +59,22 @@ const TRANSIENTS: Record<Transient, { ms: number; priority: number }> = {
   sad: { ms: 1400, priority: 3 },
 }
 
-/** 荧光绿（钉钉 AI 系 celebrate 眼部色） */
+/** 荧光绿（钉钉 AI 系 celebrate 眼部色）——待机色 */
 const EYE_GREEN = '#63ffb4'
+
+/** 荧光蓝——激活色。绿↔蓝之间线性插值会自然经过青色，蓄能时看上去像「充能」 */
+const EYE_BLUE = '#4aa8ff'
+
+/**
+ * 长按落锁时长（ms）。
+ *
+ * 短按不再触发录音——Eva 是钉在桌上常亮的屏幕，误触（擦屏、放置、路过、猫踩）
+ * 远多于有意的轻触；而「按住 1 秒」既要求持续接触，又有**颜色渐变**作连续反馈，
+ * 误触要么根本没按满，要么在颜色走到一半时就察觉到并松手。
+ *
+ * 松手即落锁（不是 hold-to-talk）：说话期间手不必留在屏幕上，再长按 1 秒停止。
+ */
+const HOLD_MS = 1000
 
 /**
  * 眼睛基础几何（画布 760×520，中心 (380,260)）：
@@ -129,6 +146,8 @@ function CrossSymbol({
 /**
  * 符号通用绘制：先画一层加粗模糊的荧光底，再叠实线。
  * 眼睛的「晕」是单独一层 rect 叠出来的，stroke 不会自带，不显式加就是死线条。
+ * 颜色不在这里写死：`stroke` 是可继承属性，由外层那层「眼睛颜色组」统一供给，
+ * 符号才能跟着眼睛一起绿↔蓝。
  */
 function GlowStroke({ d, opacity }: { d: string; opacity: number }) {
   return (
@@ -136,21 +155,13 @@ function GlowStroke({ d, opacity }: { d: string; opacity: number }) {
       <path
         d={d}
         fill="none"
-        stroke={EYE_GREEN}
         strokeWidth="44"
         strokeLinecap="round"
         strokeLinejoin="round"
         opacity={0.55}
         filter="url(#evaGlow)"
       />
-      <path
-        d={d}
-        fill="none"
-        stroke={EYE_GREEN}
-        strokeWidth="18"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d={d} fill="none" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round" />
     </g>
   )
 }
@@ -351,12 +362,22 @@ export function EvaScreen({
   audioLevel,
   error,
   onToggleRecording,
+  onPressStart,
   onConnect,
   shakeTick,
 }: EvaScreenProps) {
   const { active, play } = useTransient()
-  /** 视线跟随：按下时的归一化偏移（-0.5 ~ 0.5），松手后回零 */
-  const [gaze, setGaze] = useState({ x: 0, y: 0 })
+  /**
+   * 长按蓄能中。它是眼睛颜色与边光的唯一驱动：
+   * 蓄能期间只做一件事——颜色朝落锁后的状态渐变，不加任何位移或形变。
+   */
+  const [charging, setCharging] = useState(false)
+  /**
+   * 落锁后、录音链路真正建立前的过渡窗口。首次取麦克风要等系统权限弹窗（可能很久），
+   * 这段时间必须保持「已激活」的视觉——否则眼睛会在落锁瞬间弹回绿色，等录音真起来再变蓝，
+   * 中间闪那一下会让「到蓝色就算完全激活」这件事失去说服力。
+   */
+  const [pendingStart, setPendingStart] = useState(false)
 
   // ── 基底：会话状态决定（常驻） ──
   const base: Base = !connected
@@ -385,6 +406,16 @@ export function EvaScreen({
     if (was && !connected) play('sad')
   }, [connected, play])
 
+  // 录音真的建立了 → 过渡窗口结束（颜色本来就是蓝的，不产生二次跳变）
+  useEffect(() => {
+    if (recording) setPendingStart(false)
+  }, [recording])
+
+  // 取麦失败（micError 有任何变化）→ 没有录音可等，收回激活态，颜色退回绿色
+  useEffect(() => {
+    if (error) setPendingStart(false)
+  }, [error])
+
   // ── 摇晃手机 → `> <` 挤眼 ──
   // 传感器由 App 层统一监听（权限在麦克风授权时一并申请），这里只消费计数变化。
   // 掉线时不响应：那时眼睛应当表达「难过」，不该被晃得挤眼
@@ -395,38 +426,85 @@ export function EvaScreen({
     if (connected) play('wink')
   }, [shakeTick, connected, play])
 
-  // ── 自主微动作：仅基底可睁眼时（idle / listening） ──
-  useIdleBehavior(base === 'idle' || base === 'listening', play)
+  // ── 自主微动作：仅基底可睁眼时（idle / listening）──
+  // 蓄能期间停掉：自动眨眼会把正要落下的眼皮「闪」回去，让 1s 的蓄能反馈断条
+  useIdleBehavior(!charging && (base === 'idle' || base === 'listening'), play)
 
-  // ── 微眼震：待机时持续轻微游移。眨眼/情绪动作期间关掉，避免与主动作打架 ──
-  const saccade = useSaccade(!active && (base === 'idle' || base === 'listening'))
+  // ── 微眼震：待机时持续轻微游移。眨眼/情绪动作/长按蓄能期间关掉，避免与主动作打架 ──
+  const saccade = useSaccade(!active && !charging && (base === 'idle' || base === 'listening'))
 
-  const handleTap = useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
-      // 视线跟随：按下的位置决定眼睛朝哪边偏
-      const r = e.currentTarget.getBoundingClientRect()
-      const nx = (e.clientX - r.left) / r.width - 0.5
-      const ny = (e.clientY - r.top) / r.height - 0.5
-      setGaze({ x: Math.max(-0.5, Math.min(0.5, nx)), y: Math.max(-0.5, Math.min(0.5, ny)) })
+  // ── 长按落锁：按住蓄能 HOLD_MS → 切换录音；提前松手 → 眼皮弹回，零副作用 ──
+  // 蓄能态用 ref 同步记录：pointerdown / pointerup / 落锁定时器都在同一手势里连续发生，
+  // 不能等 React 状态提交；charging 只负责驱动视觉（眼皮下落、辉光衰减）。
+  const chargingRef = useRef(false)
+  const chargeTimerRef = useRef<number | null>(null)
 
-      if (!connected) onConnect()
-      else onToggleRecording()
-    },
-    [connected, onConnect, onToggleRecording],
-  )
-
-  /** 松手：视线回正，由注视层的 CSS 弹簧过渡平滑带回 */
-  const handleRelease = useCallback(() => {
-    setGaze({ x: 0, y: 0 })
+  const clearChargeTimer = useCallback(() => {
+    if (chargeTimerRef.current !== null) {
+      window.clearTimeout(chargeTimerRef.current)
+      chargeTimerRef.current = null
+    }
   }, [])
 
-  // ── 注视层：视线跟随 + 微眼震，叠加在姿态层之外 ──
-  // 两层分离的意义：眨眼只动姿态层，视线偏移只动注视层，互不覆盖
-  const gazeX = gaze.x * 16 + saccade.x
-  const gazeY = gaze.y * 10 + saccade.y
+  useEffect(() => clearChargeTimer, [clearChargeTimer])
+
+  const handlePress = useCallback(() => {
+    // 传感器授权必须在用户手势内**同步**发起（iOS 只认手势），而它是一次性、粘性的。
+    // 放在这里而不是落锁时：落锁发生在 1s 后的定时器里，早已脱离手势上下文。
+    onPressStart()
+
+    if (!connected) {
+      onConnect()
+      return
+    }
+    if (chargingRef.current) return
+
+    chargingRef.current = true
+    setCharging(true)
+    chargeTimerRef.current = window.setTimeout(() => {
+      chargeTimerRef.current = null
+      chargingRef.current = false
+      // 落锁：颜色已走完渐变，松手不改变任何视觉，只切换录音
+      setCharging(false)
+      if (!recording) setPendingStart(true)
+      onToggleRecording()
+    }, HOLD_MS)
+  }, [connected, onConnect, onPressStart, onToggleRecording, recording])
+
+  /** 松手：落锁前的松手一律视为取消，颜色原路渐变回去；已落锁的松手什么都不做 */
+  const handleRelease = useCallback(() => {
+    clearChargeTimer()
+    if (!chargingRef.current) return
+    chargingRef.current = false
+    setCharging(false)
+  }, [clearChargeTimer])
+
+  /**
+   * 激活态：录音中，或落锁后正在等录音建立。它是眼睛颜色与边光的唯一来源。
+   */
+  const activated = recording || pendingStart
+
+  // ── 颜色即状态 ──
+  // 绿 = 待机，蓝 = 激活。蓄能期间唱反调：这只眼睛的目标是**落锁之后**的状态，
+  // 于是「开始录音」= 绿→蓝、「停止录音」= 蓝→绿，渐变正好在落锁那一帧走完。
+  // 到蓝即完全激活——所以落锁的瞬间不需要再闪一下别的什么。
+  const eyeColor = charging ? (activated ? EYE_GREEN : EYE_BLUE) : activated ? EYE_BLUE : EYE_GREEN
+  const eyeColorTransition = charging
+    ? `fill ${HOLD_MS}ms linear, stroke ${HOLD_MS}ms linear`
+    : 'fill 260ms ease, stroke 260ms ease'
+
+  // ── 注视层：只承载微眼震，叠加在姿态层之外 ──
+  // 两层分离的意义：眨眼/眯眼只动姿态层，微眼震只动位置，互不覆盖。
+  // 这里**不再**跟随触点——长按蓄能期间唯一该动的东西是颜色。
+  const gazeX = saccade.x
+  const gazeY = saccade.y
   const gazeStyle: CSSProperties = {
     transform: `translate(${gazeX.toFixed(2)}px, ${gazeY.toFixed(2)}px)`,
-    transition: `transform 320ms ${SPRING_SOFT}`,
+    // 颜色挂在这一层，靠 fill / stroke 的**继承**统一供给眼睛与符号：
+    // 子元素不再各自写死颜色，绿↔蓝只在这里过渡一次
+    fill: eyeColor,
+    stroke: eyeColor,
+    transition: `transform 320ms ${SPRING_SOFT}, ${eyeColorTransition}`,
   }
 
   // ── 姿态层：眨眼/眯眼/挤眼等形状变化 ──
@@ -459,13 +537,16 @@ export function EvaScreen({
   // 收音强度是状态，不该变成亮度。聆听态的变化交给屏幕边框辉光
   const glowOpacity = base === 'idle' || base === 'listening' ? 0.26 : 0.2
   const happy = active === 'happy'
-  // AO（环境光/氛围灯）只在聆听时点亮——对齐官方「屏幕四周亮起即表示正在聆听」。
+  // 边光：只在激活态点亮，是一圈绕屏缓慢旋转的彩色光圈——此时眼睛是蓝的，
+  // 边光再单给某一种颜色只会和眼睛抢同一种语言；尺寸与扩散范围沿用原单色版。
+  //   · 开始录音：落锁成功的那一瞬间才亮（蓄能期间不预亮、不渐亮）
+  //   · 停止录音：蓄能期间逐渐熄灭，退到一定程度光就没了，比颜色回到绿色更早
   // 情绪类瞬时动作期间暂时熄灭，避免「嘴在笑、灯还在听」
   const talking = active === 'happy' || active === 'sad'
-  const auraVisible = base === 'listening' && !talking
+  const auraVisible = activated && !charging && !talking
 
   return (
-    <div className="fixed inset-0 z-50 select-none bg-[#050807]">
+    <div className="fixed inset-0 z-50 select-none overflow-hidden bg-[#050807]">
       {/* SVG 滤镜：荧光晕（feGaussianBlur）——眼睛「配一圈荧光」的来源 */}
       <svg width="0" height="0" aria-hidden="true" className="absolute">
         <defs>
@@ -475,25 +556,32 @@ export function EvaScreen({
         </defs>
       </svg>
 
-      {/* 屏幕辉光：不画边框、不做硬描边，光从四边朝屏心连续衰减。
-          见 globals.css .eva-glow —— 加任何实心 inset 描边都会在边缘切出硬边 */}
+      {/* 激活辉光：一圈绕屏旋转的彩色光圈（见 globals.css .eva-glow）。
+          出现要「一瞬间」——过渡挂在**隐藏态**上：变亮时新样式没有过渡、立刻点亮，
+          变暗时才有 700ms，于是停止录音的蓄能期间光会逐渐退掉 */}
       <div
         aria-hidden="true"
         className={cn(
-          'eva-glow pointer-events-none absolute inset-0 transition-opacity duration-700 ease-out',
+          'eva-glow pointer-events-none absolute inset-0',
           auraVisible ? 'opacity-100' : 'opacity-0',
         )}
+        style={{ transition: auraVisible ? 'none' : 'opacity 700ms ease-out' }}
       />
 
-      {/* 整屏轻触层——Eva 形态唯一的输入面（tap 语义；触屏防滚动同 MicButton：只绑 pointer） */}
+      {/* 整屏按下层——Eva 形态唯一的输入面（触屏防滚动同 MicButton：只绑 pointer）。
+          长按 1s 落锁，不是 hold-to-talk：落锁后松手继续录，再长按 1s 停止。
+          iOS 的 1s 长按会呼出文本选择 / 放大镜 / 系统菜单，必须 contextmenu + touch-callout 一起掐掉 */}
       <button
         type="button"
-        aria-label={connected ? (recording ? 'Stop recording' : 'Start recording') : 'Reconnect'}
-        onPointerDown={handleTap}
+        aria-label={
+          connected ? (recording ? 'Hold to stop recording' : 'Hold to start recording') : 'Reconnect'
+        }
+        onPointerDown={handlePress}
         onPointerUp={handleRelease}
         onPointerCancel={handleRelease}
         onPointerLeave={handleRelease}
-        style={{ touchAction: 'none' }}
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ touchAction: 'none', WebkitTouchCallout: 'none', userSelect: 'none' }}
         className="absolute inset-0 h-full w-full cursor-pointer focus:outline-none"
       />
 
@@ -510,7 +598,7 @@ export function EvaScreen({
               aria-hidden="true"
               style={{ overflow: 'visible' }}
             >
-              {/* 注视层：视线跟随 + 微眼震，只平移不参与形状变化 */}
+              {/* 注视层：微眼震，只平移不参与形状与颜色变化 */}
               <g style={gazeStyle}>
                 {/* 头部组（点头等整体位移在此生效） */}
                 <g style={headStyle}>
@@ -531,7 +619,6 @@ export function EvaScreen({
                           width={EYE_W + GLOW_PAD * 2}
                           height={EYE_H + GLOW_PAD * 2}
                           rx={EYE_R + GLOW_PAD}
-                          fill={EYE_GREEN}
                           filter="url(#evaGlow)"
                           style={{
                             opacity: happy ? 0 : glowOpacity,
@@ -540,8 +627,6 @@ export function EvaScreen({
                         />
                         <path
                           d={happyPath(cx)}
-                          fill={EYE_GREEN}
-                          stroke={EYE_GREEN}
                           strokeWidth={GLOW_PAD * 2}
                           filter="url(#evaGlow)"
                           style={{
@@ -551,7 +636,6 @@ export function EvaScreen({
                         />
                         <path
                           d={capsulePath(cx)}
-                          fill={EYE_GREEN}
                           style={{
                             opacity: happy ? 0 : 1,
                             transition: 'opacity 160ms ease',
@@ -560,7 +644,6 @@ export function EvaScreen({
                         {/* 开心：形状换成月牙，与胶囊交叉淡出 */}
                         <path
                           d={happyPath(cx)}
-                          fill={EYE_GREEN}
                           style={{
                             opacity: happy ? 1 : 0,
                             transition: 'opacity 200ms ease',

@@ -13,7 +13,7 @@ port: 48085
 
 # 前端形态：
 #   codex-micro  —— 默认工具形态：Hold/Tap 双模式、耳返与「转文字」开关齐备
-#   qwennote-eva —— Eva 眼睛桌宠形态：整屏一对随状态变情的眼睛，整屏轻触即录音；
+#   qwennote-eva —— Eva 眼睛桌宠形态：整屏一对随状态变情的眼睛，整屏长按 1 秒切换录音；
 #                   仅 Tap、耳返硬关闭、ASR 听写恒开（服务端强制，前端无开关）
 # 白名单外的值一律回退 codex-micro，不会导致启动失败
 mode: codex-micro
