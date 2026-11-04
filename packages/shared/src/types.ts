@@ -104,8 +104,8 @@ export interface ConnectionInfo {
 
 // ─── 虚拟音频设备 ───
 
-/** VB-Cable 安装状态 */
-export type InstallStatus = 'not_installed' | 'installing' | 'installed' | 'failed'
+/** VB-Cable 安装状态；'disabled' = 配置中未启用虚拟麦克风（不探测、不告警） */
+export type InstallStatus = 'not_installed' | 'installing' | 'installed' | 'failed' | 'disabled'
 
 /** 宿主机音频设备状态 */
 export interface AudioDeviceStatus {

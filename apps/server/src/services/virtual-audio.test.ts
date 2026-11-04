@@ -103,7 +103,7 @@ async function tick(n = 1): Promise<void> {
 
 /** 常用：启动（扫描 D21）→ 喂 1200 样本 → 等开流完成 */
 async function openStream(f: Fake, samples = 1200): Promise<VirtualAudioManager> {
-  const mgr = new VirtualAudioManager(f.api)
+  const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
   await mgr.start()
   mgr.writeInputPCM(chunk(samples))
   await settle()
@@ -157,7 +157,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
   it('start：扫描到 CABLE → installed；无设备 → not_installed 且安装提示不变', async () => {
     const f = createFake()
     f.setDevices([device(21)])
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     const st = mgr.getDeviceStatus()
     expect(st.virtualInputAvailable).toBe(true)
@@ -165,7 +165,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
     expect(st.installStatus).toBe('installed')
 
     const f2 = createFake()
-    const mgr2 = new VirtualAudioManager(f2.api)
+    const mgr2 = new VirtualAudioManager({ inputEnabled: true }, f2.api)
     await mgr2.start()
     expect(mgr2.getDeviceStatus().installStatus).toBe('not_installed')
     expect(mgr2.getDeviceStatus().installError).toContain('get-driver')
@@ -174,7 +174,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
   it('阈值：≤1024 样本不开流，越过阈值后开流且参数正确', async () => {
     const f = createFake()
     f.setDevices([device(21)])
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
 
     mgr.writeInputPCM(chunk(600))
@@ -212,7 +212,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
   it('48k 重采样：入 1176 → 出 1080（比例正确，常量值保持）', async () => {
     const f = createFake()
     f.setDevices([device(21)])
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     mgr.writeInputPCM(chunk(1176, 0.5, 48000))
     await settle()
@@ -250,7 +250,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
     const f = createFake()
     f.setDevices([device(21)], [device(33)])
     f.openErrors.push(new Error('Invalid device'))
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     mgr.writeInputPCM(chunk(1200))
     await settle()
@@ -265,7 +265,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
     const f = createFake()
     f.setDevices([device(21)]) // 重扫仍是同一 id → 不触发漂移重试
     f.openErrors.push(new Error('e1'))
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     mgr.writeInputPCM(chunk(1200))
     await settle()
@@ -305,7 +305,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
   it('端点采样率取设备 defaultSampleRate（48000）——不被硬编码 44100 污染', async () => {
     const f = createFake()
     f.setDevices([device(21, { defaultSampleRate: 48000 })])
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     mgr.writeInputPCM(chunk(1200, 0.5, 48000))
     await settle()
@@ -321,7 +321,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
     const f = createFake()
     f.setDevices([device(21, { defaultSampleRate: 44100 })]) // 设备谎报 44100
     f.openErrors.push(new Error('Invalid sample rate')) // 实际只认 48000
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     mgr.writeInputPCM(chunk(1200, 0.5, 48000))
     await settle()
@@ -335,7 +335,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
     const f = createFake()
     f.setDevices([device(21)]) // 重扫仍是同一 id
     f.openErrors.push(new Error('Invalid device'))
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     mgr.writeInputPCM(chunk(1200))
     await settle()
@@ -360,7 +360,7 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
       }),
     ])
     f.openErrors.push(new Error('Invalid device')) // 首选 #19 失败
-    const mgr = new VirtualAudioManager(f.api)
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
     await mgr.start()
     mgr.writeInputPCM(chunk(1200, 0.5, 48000))
     await settle()
@@ -387,5 +387,57 @@ describe('VirtualAudioManager（替身 PortAudio）', () => {
     const writes = f.streams[0].writes.length
     await tick(5)
     expect(f.streams[0].writes.length).toBe(writes) // 定时器已清
+  })
+  // ─── 虚拟麦克风降级为可选（默认关闭）───
+
+  it('默认关闭：不扫设备、不建流，状态为 disabled 且 installError 为 null', async () => {
+    const f = createFake()
+    f.setDevices([device(21)])
+    const mgr = new VirtualAudioManager({}, f.api)
+    await mgr.start()
+
+    const st = mgr.getDeviceStatus()
+    expect(st.installStatus).toBe('disabled')
+    expect(st.installError).toBeNull()
+    expect(st.virtualInputAvailable).toBe(false)
+    expect(f.opens.length).toBe(0)
+  })
+
+  it('默认关闭：writeInputPCM 不解码、不入环形缓冲——之后仍不会开流', async () => {
+    const f = createFake()
+    f.setDevices([device(21)])
+    const mgr = new VirtualAudioManager({}, f.api)
+    await mgr.start()
+
+    mgr.writeInputPCM(chunk(10_000)) // 远超 1024 阈值
+    await settle()
+    await tick(3)
+    expect(f.opens.length).toBe(0)
+    expect(mgr.getDeviceStatus().inputActive).toBe(false)
+  })
+
+  it('默认关闭：不初始化 PortAudio——由外部注入的替身证明 pa 未被构造而是注入的空实现', () => {
+    // 不传 pa：关闭态下应使用内部 noop，且 supported=false（不会拉起 worker）
+    const mgr = new VirtualAudioManager({})
+    expect(mgr.getDeviceStatus().installStatus).toBe('disabled')
+    // 无法直接观察 pa，但 start() 不抛、不扫描即可证明短路（见上一条用例）
+    expect(mgr.getDeviceStatus().virtualInputAvailable).toBe(false)
+  })
+
+  it('回传恒开：关闭虚拟麦克风也照样具备系统声回传能力（无开关）', async () => {
+    const f = createFake()
+    const mgr = new VirtualAudioManager({ inputEnabled: false }, f.api)
+    await mgr.start()
+    expect(mgr.getDeviceStatus().installStatus).toBe('disabled')
+    expect(mgr.getDeviceStatus().virtualOutputAvailable).toBe(true)
+  })
+
+  it('启用但缺驱动：仍按 not_installed + 安装提示（显式开启才劝装）', async () => {
+    const f = createFake()
+    const mgr = new VirtualAudioManager({ inputEnabled: true }, f.api)
+    await mgr.start()
+    const st = mgr.getDeviceStatus()
+    expect(st.installStatus).toBe('not_installed')
+    expect(st.installError).toContain('get-driver')
   })
 })

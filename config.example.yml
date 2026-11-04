@@ -1,0 +1,20 @@
+# vow 配置模板
+#
+# 复制为同目录下的 config.yml 后按需修改（config.yml 已在 .gitignore 中，不会入库）：
+#
+#   cp config.example.yml config.yml        # Linux / macOS / Git Bash
+#   copy config.example.yml config.yml      # cmd / PowerShell
+#
+# 除端口外，全部运行期配置都来自 config.yml；环境变量仅 PORT 一个逃生口（优先级高于文件）。
+# config.yml 缺失或解析失败时一律回落到内置默认值，不会导致启动失败。
+
+# 服务端口（也可用环境变量 PORT 临时覆盖）
+port: 48085
+
+# 虚拟麦克风：把手机音频写入 VB-Cable，使手机成为宿主的「系统麦克风」
+#
+# 这是唯一的可选系统级接入——需要自行安装 VB-Cable 驱动（pnpm get-driver）。
+# 默认关闭：关闭时不做任何设备探测、不加载 PortAudio、不产生任何警告。
+# 核心功能（手机录音上传 + 电脑端 ASR 转写）不受此项影响。
+virtualAudio:
+  enabled: false

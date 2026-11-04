@@ -3,14 +3,13 @@ import { Hono } from 'hono'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { config } from 'dotenv'
 import { resolve } from 'node:path'
 import { createServer as createHttpsServer } from 'node:https'
 import { audioRoutes } from './routes/audio'
 import { sseRoutes } from './routes/sse'
 import { createKeyRoutes } from './routes/keys'
 import { sseHub } from './services/sse-hub'
-import { virtualAudio } from './services/virtual-audio'
+import { initVirtualAudio } from './services/virtual-audio'
 import { createDictation, resolveEngineConfig } from './services/dictation'
 import { loadNativeKeys } from './services/win32-keys'
 import { createAsrDictation, resolveAsrConfig, type AsrDictation } from './services/iflytek-asr'
@@ -18,6 +17,7 @@ import { typeText } from './services/typing'
 import { ensureCert } from './services/tls-cert'
 import { createAuthMiddleware, createTokenStore } from './services/auth'
 import { printPairingCode } from './services/pairing-qr'
+import { loadConfig } from './services/config'
 import { createPairRoutes } from './routes/pair'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -35,9 +35,13 @@ function findRepoRoot(start: string): string {
 }
 
 const repoRoot = findRepoRoot(__dirname)
-config({ path: join(repoRoot, '.env') })
+// 运行期配置全部来自 <repoRoot>/config.yml（A20）；环境变量仅 PORT 一个逃生口
 
-const PORT = parseInt(process.env.PORT || '48085', 10)
+const appConfig = loadConfig({ repoRoot })
+const PORT = appConfig.port
+
+// 虚拟麦克风（VB-Cable）默认关闭：关闭时连 PortAudio worker 都不会初始化
+const virtualAudio = initVirtualAudio({ inputEnabled: appConfig.virtualAudio.enabled })
 
 /** .vow/：TLS 证书与配对令牌的存放地（gitignored） */
 const vowDir = join(repoRoot, '.vow')
@@ -132,7 +136,9 @@ sseHub.onDictationChange = (active, sessionId, reason) => {
   }
 }
 
-console.log(`Server starting on https://localhost:${PORT}（听写引擎：${engineCfg.engine}）`)
+console.log(
+  `Server starting on https://localhost:${PORT}（听写引擎：${engineCfg.engine}；虚拟麦克风：${appConfig.virtualAudio.enabled ? '开' : '关'}）`,
+)
 const { key, cert } = ensureCert(vowDir)
 serve({
   fetch: app.fetch,

@@ -324,8 +324,8 @@ export function App() {
               <VolumeIndicator level={audioLevel} recording={recording} />
             </div>
 
-            {/* VB-Cable 安装状态 */}
-            {deviceStatus && (
+            {/* VB-Cable 安装状态——'disabled' = 配置未启用虚拟麦克风，整块不渲染（无任何提示） */}
+            {deviceStatus && deviceStatus.installStatus !== 'disabled' && (
               <>
                 {deviceStatus.installStatus === 'installing' && (
                   <div className="text-xs text-muted-foreground text-center bg-muted/50 rounded-lg px-4 py-2 animate-pulse">

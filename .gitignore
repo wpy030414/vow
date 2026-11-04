@@ -14,9 +14,8 @@ dist/
 .DS_Store
 Thumbs.db
 
-# 环境变量
-.env
-.env.local
+# 本地配置（从 config.example.yml 复制）
+/config.yml
 
 # IDE
 .vscode/

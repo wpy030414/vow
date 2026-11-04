@@ -1,6 +1,7 @@
-// VirtualAudioManager — 虚拟音频输入/输出设备管理
-// 输入：手机 PCM (SSE) → RingBuffer → @vow/portaudio（koffi→PortAudio，worker 线程）→ VB-Cable → 桌面应用
-// 输出：WASAPI loopback → loopback-capture → SSE → 手机
+// VirtualAudioManager — 宿主音频输入/输出设备管理
+// 输入（可选，需 VB-Cable 驱动）：手机 PCM (SSE) → RingBuffer → @vow/portaudio（worker 线程）→ VB-Cable
+// 输出（默认开启，零驱动依赖）：WASAPI loopback → loopback-capture → SSE → 手机
+// 两条链路开关独立：关闭虚拟麦克风不影响系统声回传。
 
 import type { AudioDeviceStatus } from '@vow/shared/types'
 import { INPUT_RING_BUFFER_SAMPLES, VB_CABLE_KEYWORD } from '@vow/shared/constants'
@@ -167,7 +168,18 @@ function base64ToFloat32(base64: string): Float32Array {
 
 // ─── 主类 ───
 
+export interface VirtualAudioOptions {
+  /**
+   * 是否启用 VB-Cable 虚拟麦克风（手机 → 宿主系统麦克风）。
+   * 默认 false：配置关闭时**完全不启动 PortAudio worker**，不探测设备，不产生任何告警。
+   * 宿主系统声回传不受此开关影响，恒开启。
+   */
+  inputEnabled?: boolean
+}
+
 export class VirtualAudioManager {
+  /** 虚拟麦克风开关（关闭时整条输入链路短路） */
+  private readonly inputEnabled: boolean
   private inputDeviceId: number | null = null
   private inputDeviceName: string | null = null
   /** 目标端点采样率（由设备 defaultSampleRate 决定；writeInputPCM 据此重采样） */
@@ -187,8 +199,21 @@ export class VirtualAudioManager {
   /** 候选渲染端点（按可用性启发排序）——start() 时扫描一次，开流时逐一尝试 */
   private cableCandidates: PortAudioDevice[] = []
 
-  /** @param pa 注入 PortAudio 实现（默认进程内单例；测试注入替身） */
-  constructor(private readonly pa: PortAudioApi = getPortAudio()) {}
+  private readonly pa: PortAudioApi
+
+  /**
+   * @param opts 功能开关——只含虚拟麦克风。宿主系统声回传恒开启（零驱动依赖、无代价）
+   * @param pa   注入 PortAudio 实现（默认进程内单例；测试注入替身）。
+   *             **惰性构造**：仅当 inputEnabled 才真正取 getPortAudio()，
+   *             关闭虚拟麦克风时不会初始化 PortAudio（不加载 DLL、不建 worker）。
+   */
+  constructor(
+    private readonly opts: VirtualAudioOptions = {},
+    pa?: PortAudioApi,
+  ) {
+    this.inputEnabled = opts.inputEnabled ?? false
+    this.pa = pa ?? (this.inputEnabled ? getPortAudio() : createNoopPortAudio())
+  }
 
   // ─── 公开 API ───
 
@@ -203,38 +228,47 @@ export class VirtualAudioManager {
       outputDeviceName: this.outputDeviceId !== null ? 'WASAPI Loopback' : null,
       inputActive: this.inputActive,
       outputActive: this.outputActive,
-      installStatus: this.inputDeviceId !== null ? 'installed' : 'not_installed',
+      // 关闭态 = 'disabled'：前端据此整块不渲染，不做任何"去装驱动"的吆喝
+      installStatus: !this.inputEnabled
+        ? 'disabled'
+        : this.inputDeviceId !== null
+          ? 'installed'
+          : 'not_installed',
       installError:
-        this.inputDeviceId !== null
-          ? null
-          : 'Run pnpm -w run get-driver to install the VB-Cable driver',
+        this.inputEnabled && this.inputDeviceId === null
+          ? 'Run pnpm -w run get-driver to install the VB-Cable driver'
+          : null,
     }
   }
 
   async start(): Promise<void> {
-    console.log('[VirtualAudio] scanning devices...')
-    let devices: PortAudioDevice[] = []
-    try {
-      devices = await this.pa.getDevices()
-    } catch (err) {
-      console.warn('[VirtualAudio] device scan failed:', err instanceof Error ? err.message : err)
+    // 虚拟麦克风关闭：整条输入链路不初始化（无设备扫描、无告警、无 PortAudio worker）
+    if (this.inputEnabled) {
+      console.log('[VirtualAudio] scanning devices...')
+      let devices: PortAudioDevice[] = []
+      try {
+        devices = await this.pa.getDevices()
+      } catch (err) {
+        console.warn('[VirtualAudio] device scan failed:', err instanceof Error ? err.message : err)
+      }
+
+      this.cableCandidates = selectCableDevices(devices)
+      const dev = this.cableCandidates[0]
+      if (dev) {
+        this.inputDeviceId = dev.id
+        this.inputDeviceName = dev.name
+        this.inputSampleRate = normalizeRate(dev.defaultSampleRate)
+        console.log(
+          `[VirtualAudio] Virtual input candidates: ${this.cableCandidates.map((d) => `#${d.id} "${d.name}"`).join(' | ')}`,
+        )
+      } else {
+        console.warn('[VirtualAudio] VB-Cable not found — virtual mic unavailable')
+        console.warn('[VirtualAudio] run: pnpm -w run get-driver (as Administrator)')
+      }
     }
 
-    this.cableCandidates = selectCableDevices(devices)
-    const dev = this.cableCandidates[0]
-    if (dev) {
-      this.inputDeviceId = dev.id
-      this.inputDeviceName = dev.name
-      this.inputSampleRate = normalizeRate(dev.defaultSampleRate)
-      console.log(
-        `[VirtualAudio] Virtual input candidates: ${this.cableCandidates.map((d) => `#${d.id} "${d.name}"`).join(' | ')}`,
-      )
-    } else {
-      console.warn('[VirtualAudio] VB-Cable not found — virtual mic unavailable')
-      console.warn('[VirtualAudio] run: pnpm -w run get-driver (as Administrator)')
-    }
-
-    // 验证 loopback 可用性
+    // 验证 loopback 可用性——与 VB-Cable 无关：WASAPI 抓默认播放设备的混音。
+    // 回传恒开启（零驱动依赖、无运行代价），因此没有开关分支
     try {
       const LC = lcCtor()
       const probe = new LC()
@@ -259,7 +293,8 @@ export class VirtualAudioManager {
   // ─── 输入链路：手机 PCM → RingBuffer → VB-Cable ───
 
   writeInputPCM(data: { data: string; sampleRate: number }): void {
-    if (!this.inputDeviceId) return
+    // 关闭态直接丢弃——不做 base64 解码与重采样；该函数按音频块频率被调用，热路径保持零开销
+    if (!this.inputEnabled || !this.inputDeviceId) return
     const float32 = base64ToFloat32(data.data)
     if (float32.length === 0) return
     // 手机实际采样率常为 48000，端点采样率由设备决定（多见 48000，亦可能 44100）——
@@ -501,6 +536,31 @@ export class VirtualAudioManager {
   }
 }
 
-// ─── 单例 ───
+// ─── 关闭态占位实现 ───
 
-export const virtualAudio = new VirtualAudioManager()
+/** 输入链路关闭时使用的空实现——避免为「永远不写入」的开关初始化 PortAudio worker */
+function createNoopPortAudio(): PortAudioApi {
+  const notSupported = (): Promise<never> => Promise.reject(new Error('PortAudio disabled'))
+  return {
+    supported: false,
+    getDevices: notSupported,
+    openOutput: notSupported,
+    shutdown: async () => {},
+  } as unknown as PortAudioApi
+}
+
+// ─── 单例（功能开关于 start() 前由 index.ts 按 config.yml 装配）───
+
+let singleton: VirtualAudioManager | null = null
+
+/** 按配置装配单例（仅启动时调用一次；未装配时默认全关闭） */
+export function initVirtualAudio(opts: VirtualAudioOptions): VirtualAudioManager {
+  singleton = new VirtualAudioManager(opts)
+  return singleton
+}
+
+/** 取当前单例（未装配时按默认开关创建） */
+export function getVirtualAudio(): VirtualAudioManager {
+  singleton ??= new VirtualAudioManager()
+  return singleton
+}

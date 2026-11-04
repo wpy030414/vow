@@ -28,7 +28,7 @@ vow 让任何带浏览器的手机 / 平板，通过局域网变身为宿主机�
 - **Windows 10 / 11（x64）**
 - **Node.js 24（LTS）**——版本钉在根目录 `.nvmrc`（`nvm use` / `fnm use` 自动读取）
 - **pnpm**（建议最新稳定版；开发环境为 pnpm 12，workspace 配置用到 `allowBuilds`）
-- **VB-Cable 虚拟音频驱动**——vow 不自造虚拟声卡，而是**写入 VB-Cable 提供的 `CABLE Input` 端点**。首次使用必须先安装（见第二步），安装后**需重启系统**，端点才会出现。
+- **VB-Cable 虚拟音频驱动（可选）**——仅在需要「把手机当作宿主系统麦克风」时安装。vow 不自造虚拟声卡，而是写入 VB-Cable 提供的 `CABLE Input` 端点；安装后**需重启系统**端点才会出现。**核心功能（手机录音 → 电脑端 ASR 转写）不需要它。**
 
 ## 快速开始
 
@@ -38,13 +38,36 @@ vow 让任何带浏览器的手机 / 平板，通过局域网变身为宿主机�
 pnpm install
 ```
 
-### 2. 安装虚拟音频驱动（首次必做）
+### 2. 配置（可选）
+
+复制配置模板（`config.yml` 不入库，仅存在于本机）：
+
+```bash
+cp config.example.yml config.yml
+```
+
+运行期配置全部来自仓库根的 `config.yml`，**环境变量只有 `PORT`** 一个逃生口（优先级高于文件）：
+
+```yaml
+port: 48085
+
+# 虚拟麦克风：把手机音频写入 VB-Cable，使手机成为宿主的「系统麦克风」
+# 默认关闭——关闭时不探测设备、不加载 PortAudio、不产生任何警告
+virtualAudio:
+  enabled: false
+```
+
+文件缺失或解析失败会静默回落到内置默认值，不会导致启动失败。
+
+> **宿主系统声回传（耳返）恒开启**：走 WASAPI loopback 直抓默认播放设备，不依赖任何虚拟驱动，因此没有开关。
+
+### 2b. 安装虚拟音频驱动（仅在启用虚拟麦克风时需要）
 
 ```bash
 pnpm get-driver        # 需要【管理员权限】；自动下载并安装 VB-Cable
 ```
 
-安装完成后**重启系统**。重启后系统中会出现 `CABLE Input` / `CABLE Output` 端点——虚拟麦克风与反向监听都跑在它上面。
+安装完成后**重启系统**。重启后系统中会出现 `CABLE Input` / `CABLE Output` 端点；再把 `config.yml` 的 `virtualAudio.enabled` 置为 `true`。
 
 > 为什么不能省：VB-Cable 是「根枚举虚拟设备」，`pnputil` 直接注册 INF 只会把驱动包登记进仓库、**不会创建设备节点**（设备必须由厂商安装器创建），且装完必须重启。这一步无法免依赖、也无法免重启。
 
@@ -105,7 +128,7 @@ pnpm pair --rotate         # 轮换令牌——所有已配对设备立即失效
 ## 已知边界
 
 - **仅 Windows**——见「平台与前置要求」
-- **必须装 VB-Cable 并重启**，无法免依赖运行
+- **虚拟麦克风需装 VB-Cable 并重启**，无法免依赖运行；不启用该功能时无此前提
 - **iOS 扬声器路由**：`navigator.audioSession` 需 iOS 16.4+；更低的版本上，一旦用过麦克风，外放会被系统锁在「听筒」（网页层不可解）
 - **后台续传分平台**：Android Chrome / 桌面 Chrome 可在后台持续采集与播放；iOS Safari 后台会被系统挂起并收回麦克风，回前台自动恢复（后台期间音频不进上行链路）
 - **听写为私有协议**：`iflytek-api` 是逆向实现的讯飞私有 ASR 直连，存在被服务端升级破坏的风险（用 `VOW_DICTATION_ENGINE=win-dictation` 一行 env 可切回 Win+H 保底引擎）
@@ -121,6 +144,7 @@ vow/
 ├── packages/
 │   ├── shared/          # 前后端共享类型与常量
 │   └── portaudio/       # PortAudio 封装（koffi FFI + 自持 DLL，worker 线程）
+├── config.example.yml   # 配置模板（复制为 config.yml 使用，后者不入库）
 ├── scripts/             # get-driver / pair / portaudio-check 等运维脚本
 └── docs/                # PRD / ARCHITECTURE / DECISIONS
 ```

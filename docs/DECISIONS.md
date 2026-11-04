@@ -65,6 +65,7 @@
 
 ### A11：语音转文字双引擎——iflytek-api 私有协议直连（默认）+ Win+H 保底
 
+
 **决策**：hold + 「转文字」触发听写。默认 `iflytek-api`：服务端直连讯飞私有 ASR（签名握手 + raw PCM16@16k WS 推流），终稿经 SendInput（KEYEVENTF_UNICODE）打入焦点窗口；凭据（apiKey/apiSecret/appId）以 base64 集成于源码，开箱即用、env 可逐字段覆盖；注入 `VOW_DICTATION_ENGINE=win-dictation` 才切换到 `win-dictation`（koffi → keybd_event 注入 Win+H，toggle 语义）。
 **理由**：
 - Claude Code 原生 voice 模式为纯云端转写 + claude.ai OAuth 三重 gate（本机代理环境不可用），排除
@@ -147,3 +148,13 @@
 **决策**：移除 tsup / vitest / eslint 直装依赖，改由 `vite-plus` 提供 `vp dev` / `vp build` / `vp pack` / `vp check` / `vp test`；根目录 `vite.config.ts` 承载 workspace 级 fmt（oxfmt：无分号、单引号）与 lint（oxlint + tsgolint 类型感知）配置；不在 `package.json` 声明 `packageManager`，由 vp 依据 lockfile 检测并代理包管理器。
 **理由**：一个 CLI 覆盖 dev / build / check / test，不再拼装 vite + tsup + vitest + eslint 四套配置；格式与 lint 规则集中在仓库根，各子包 `vp check` 向上继承。`pnpm-workspace.yaml` 按 Vite+ 官方要求补 `overrides`（`vite@*` → `@voidzero-dev/vite-plus-core@1.4.0`、`vitest@*` → `5.0.5`），保证全仓共享单一 Vite / Vitest 副本，避免 `instanceof` 判断与 mock 状态跨副本断裂。
 **代价**：Node 版本钉到 24（根 `.nvmrc`）；server 需显式声明 `vitest` 才能让 `vp check` 的类型检查解析到测试导入。`overrides` 写在 `pnpm-workspace.yaml`（pnpm 10.6+ 认可该位置，lockfile 顶部的 `overrides` 块即其产物），而不是根 `package.json`。
+
+### A20：VB-Cable 降级为可选——默认关闭、零告警、零初始化
+
+**决策**：虚拟麦克风（手机 → 宿主「系统麦克风」）从核心链路降级为**可选系统级接入**，开关收进仓库根 `config.yml` 的 `virtualAudio.enabled`，**默认 `false`**。关闭时：不扫描设备、不加载 PortAudio（不建 worker、不载 DLL）、不产生任何告警，前端也不渲染任何「去装驱动」的提示（`installStatus: 'disabled'` 时整块不渲染）。核心功能——手机录音上传 + 电脑端讯飞 ASR 转写 + 原始音频留档——完全不受影响。同时：配置体系从 6 个环境变量收敛为 `config.yml`，**环境变量仅保留 `PORT`** 一个逃生口（`PORT` 优先级高于文件）。
+**理由**：
+- VB-Cable 是**外置第三方驱动**，需要管理员权限与**重启系统**；把它作为必需前置，等于让「说话转文字」这种一件小事背上网卡驱动级别的安装负担。而它换来的能力只有一个：让手机被其它软件识别为麦克风。
+- 链路本身早就是「缺 CABLE 则跳过」的结构（`selectCableDevices` 空则不开流、`writeInputPCM` 无设备直接丢弃），缺的只是一层**干净的关闭态**：不探测、不告警、不初始化。实现上用惰性构造——`inputEnabled=false` 时连 `getPortAudio()` 都不调用，替代为 noop 实现，从根上避免拉起 worker。
+- 宿主系统声回传（WASAPI loopback）与 VB-Cable **无任何依赖关系**（`loopback-capture` 是 N-API 预编译包，直抓默认播放设备混音），因此恒开启、不设开关——不为永远没人会关的功能制造配置债。附带收益：关闭虚拟麦克风后，「默认播放设备为 CABLE In 导致耳返数字回环」的风险从根上消失。
+- 环境变量配置在个人工具里会退化成「在哪设的、什么时候设的」的考古现场；`config.yml` 可读、可 diff、可版本化、可写注释。仅保留 `PORT` 是因为端口冲突/临时换端口需要**不改文件**就能覆盖的场景。
+**代价**：仅提供 `config.example.yml` 模板，实际 `config.yml` 被 gitignore——本地端口/开关改动不会污染 working tree，代价是新机器需手动复制一次模板；安装 VB-Cable 后仍需重启系统才能让端点出现（外部驱动固有约束，与本项目无关）。

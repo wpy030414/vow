@@ -16,14 +16,14 @@
     "@vow/portaudio": "workspace:*",
     "@vow/shared": "workspace:*",
     "adm-zip": "^0.6.1",
-    "dotenv": "^16.6.1",
     "drizzle-orm": "1.0.0-rc.4",
     "hono": "^4.13.7",
     "is-elevated": "^4.0.0",
     "koffi": "^3.3.3",
     "loopback-capture": "^3.0.2",
     "qrcode-terminal": "^0.12.0",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

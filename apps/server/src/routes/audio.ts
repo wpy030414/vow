@@ -1,7 +1,7 @@
 // 音频设备管理 API
 
 import { Hono } from 'hono'
-import { virtualAudio } from '../services/virtual-audio'
+import { getVirtualAudio } from '../services/virtual-audio'
 import { sseHub } from '../services/sse-hub'
 import type { AudioDeviceStatus, DeviceListResponse } from '@vow/shared/types'
 
@@ -10,7 +10,7 @@ export const audioRoutes = new Hono()
 // ─── GET /api/audio/devices ───
 
 audioRoutes.get('/devices', (c) => {
-  const status: AudioDeviceStatus = virtualAudio.getDeviceStatus()
+  const status: AudioDeviceStatus = getVirtualAudio().getDeviceStatus()
   // 枚举 PortAudio 可见设备
   const list: DeviceListResponse = { status, devices: [] }
   return c.json(list)
@@ -35,8 +35,8 @@ audioRoutes.post('/output', async (c) => {
     session.state.isOutputEnabled = true
 
     // 如果 capture 还没开，启动它
-    if (!virtualAudio.getDeviceStatus().outputActive) {
-      virtualAudio.startOutput()
+    if (!getVirtualAudio().getDeviceStatus().outputActive) {
+      getVirtualAudio().startOutput()
     }
   } else {
     const session = sseHub.getSession(sessionId)
@@ -50,15 +50,15 @@ audioRoutes.post('/output', async (c) => {
       return s?.state.isOutputEnabled
     })
     if (!anyOutput) {
-      virtualAudio.stopOutput()
+      getVirtualAudio().stopOutput()
     }
   }
 
-  return c.json({ ok: true, state: virtualAudio.getDeviceStatus() })
+  return c.json({ ok: true, state: getVirtualAudio().getDeviceStatus() })
 })
 
 // ─── GET /api/audio/status — 当前设备状态快照 ───
 
 audioRoutes.get('/status', (c) => {
-  return c.json(virtualAudio.getDeviceStatus())
+  return c.json(getVirtualAudio().getDeviceStatus())
 })
