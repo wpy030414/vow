@@ -80,6 +80,14 @@ export const VB_CABLE_DOWNLOAD_URL =
 /** 安装后等待设备出现的超时（毫秒） */
 export const VB_CABLE_INSTALL_TIMEOUT_MS = 30_000
 
+// ─── 前端形态 ───
+
+/** config.yml 顶层 mode 的允许值（白名单，配置侧据此归一化） */
+export const APP_MODES = ['codex-micro', 'qwennote-eva'] as const
+
+/** 默认前端形态 */
+export const DEFAULT_APP_MODE = 'codex-micro' as const
+
 // ─── 听写引擎 ───
 
 /** 已实现的听写引擎渠道（新增渠道在此追加） */

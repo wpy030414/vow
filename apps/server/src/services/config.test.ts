@@ -95,6 +95,19 @@ recording:
     const cfg = loadConfig({ repoRoot: makeRoot(), env: {} })
     expect(cfg.virtualAudio).toEqual({ enabled: false })
     expect(cfg.recording).toEqual({ enabled: false })
-    expect(Object.keys(cfg).sort()).toEqual(['port', 'recording', 'virtualAudio'])
+    expect(Object.keys(cfg).sort()).toEqual(['mode', 'port', 'recording', 'virtualAudio'])
+  })
+
+  it('mode：合法值采纳，缺省 / 非法 / 拼写错误回退 codex-micro', () => {
+    expect(normalizeConfig({}).mode).toBe('codex-micro')
+    expect(normalizeConfig({ mode: 'codex-micro' }).mode).toBe('codex-micro')
+    expect(normalizeConfig({ mode: 'qwennote-eva' }).mode).toBe('qwennote-eva')
+    expect(normalizeConfig({ mode: 'eva' }).mode).toBe('codex-micro')
+    expect(normalizeConfig({ mode: 42 }).mode).toBe('codex-micro')
+  })
+
+  it('mode 完整 yaml 读取', () => {
+    const root = makeRoot('mode: qwennote-eva\n')
+    expect(loadConfig({ repoRoot: root, env: {} }).mode).toBe('qwennote-eva')
   })
 })

@@ -9,6 +9,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse } from 'yaml'
+import type { AppMode } from '@vow/shared/types'
+import { APP_MODES, DEFAULT_APP_MODE } from '@vow/shared/constants'
 
 export interface VirtualAudioConfig {
   /**
@@ -29,6 +31,8 @@ export interface RecordingConfig {
 export interface AppConfig {
   /** 服务端口；环境变量 PORT 优先于此处 */
   port: number
+  /** 前端形态（config.yml 顶层 mode）；Eva 形态的服务端硬约束见 services/app-mode.ts */
+  mode: AppMode
   virtualAudio: VirtualAudioConfig
   recording: RecordingConfig
 }
@@ -36,6 +40,7 @@ export interface AppConfig {
 /** 内置默认值——config.yml 缺项时的兜底 */
 export const DEFAULT_CONFIG: AppConfig = {
   port: 48085,
+  mode: DEFAULT_APP_MODE,
   virtualAudio: { enabled: false },
   recording: { enabled: false },
 }
@@ -54,6 +59,13 @@ function asPort(value: unknown, fallback: number): number {
   return Number.isInteger(n) && n > 0 && n < 65536 ? n : fallback
 }
 
+/** 形态归一化：仅接受白名单值，其余（含拼写错误）回退默认——不因写错配置改变形态 */
+function asMode(value: unknown): AppMode {
+  return typeof value === 'string' && (APP_MODES as readonly string[]).includes(value)
+    ? (value as AppMode)
+    : DEFAULT_APP_MODE
+}
+
 /** 取嵌套节（非对象一律视为缺省） */
 function section(input: unknown, key: string): Record<string, unknown> {
   if (!input || typeof input !== 'object') return {}
@@ -69,6 +81,7 @@ export function normalizeConfig(raw: unknown): AppConfig {
   const rec = section(root, 'recording')
   return {
     port: asPort(root.port, DEFAULT_CONFIG.port),
+    mode: asMode(root.mode),
     virtualAudio: {
       enabled: asBool(va.enabled, DEFAULT_CONFIG.virtualAudio.enabled),
     },

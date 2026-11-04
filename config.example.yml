@@ -11,6 +11,13 @@
 # 服务端口（也可用环境变量 PORT 临时覆盖）
 port: 48085
 
+# 前端形态：
+#   codex-micro  —— 默认工具形态：Hold/Tap 双模式、耳返与「转文字」开关齐备
+#   qwennote-eva —— Eva 眼睛桌宠形态：整屏一对随状态变情的眼睛，整屏轻触即录音；
+#                   仅 Tap、耳返硬关闭、ASR 听写恒开（服务端强制，前端无开关）
+# 白名单外的值一律回退 codex-micro，不会导致启动失败
+mode: codex-micro
+
 # 虚拟麦克风：把手机音频写入 VB-Cable，使手机成为宿主的「系统麦克风」
 #
 # 这是唯一的可选系统级接入——需要自行安装 VB-Cable 驱动（pnpm get-driver）。

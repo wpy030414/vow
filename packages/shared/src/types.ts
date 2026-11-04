@@ -1,5 +1,15 @@
 // vow 共享类型定义
 
+// ─── 前端形态 ───
+
+/**
+ * 前端产品形态（config.yml 顶层 `mode`）。
+ * - codex-micro：默认工具形态（Hold/Tap 双模式、耳返与「转文字」开关齐备）
+ * - qwennote-eva：Eva 眼睛桌宠形态——整屏一对随状态变情的眼睛；仅 Tap、
+ *   耳返恒关、ASR 恒随录音（服务端强制，见 docs/DECISIONS.md A24）
+ */
+export type AppMode = 'codex-micro' | 'qwennote-eva'
+
 // ─── 会话 ───
 
 /** 会话连接请求 */
@@ -14,6 +24,8 @@ export interface ConnectRequest {
 export interface ConnectResponse {
   sessionId: string
   serverTime: number
+  /** 服务端形态（config.yml mode）——前端据此切换 Eva / 工具形态；旧服务端缺省 */
+  appMode?: AppMode
 }
 
 /** 录制模式 */
@@ -108,6 +120,8 @@ export interface ConnectionInfo {
   sessions: string[]
   /** 当前生效的听写引擎（诊断用）。渠道列表见 shared/constants 的 DICTATION_ENGINES */
   dictationEngine: DictationEngineId
+  /** 前端形态（config.yml mode）——前端开机即探，预判 Eva / 工具形态 */
+  appMode?: AppMode
 }
 
 // ─── 虚拟音频设备 ───
