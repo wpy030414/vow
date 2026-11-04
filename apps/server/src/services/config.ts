@@ -18,16 +18,26 @@ export interface VirtualAudioConfig {
   enabled: boolean
 }
 
+export interface RecordingConfig {
+  /**
+   * 把手机上行录音按会话落盘为 WAV（`<repoRoot>/.vow/recordings/`），用于事后回听 / 留档。
+   * 默认关闭：关闭时不创建目录、不触碰录音热路径。
+   */
+  enabled: boolean
+}
+
 export interface AppConfig {
   /** 服务端口；环境变量 PORT 优先于此处 */
   port: number
   virtualAudio: VirtualAudioConfig
+  recording: RecordingConfig
 }
 
 /** 内置默认值——config.yml 缺项时的兜底 */
 export const DEFAULT_CONFIG: AppConfig = {
   port: 48085,
   virtualAudio: { enabled: false },
+  recording: { enabled: false },
 }
 
 /** 布尔归一化：接受 true/false，也容忍 yaml 里手写的字符串 */
@@ -56,10 +66,14 @@ export function normalizeConfig(raw: unknown): AppConfig {
   const root: Record<string, unknown> =
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const va = section(root, 'virtualAudio')
+  const rec = section(root, 'recording')
   return {
     port: asPort(root.port, DEFAULT_CONFIG.port),
     virtualAudio: {
       enabled: asBool(va.enabled, DEFAULT_CONFIG.virtualAudio.enabled),
+    },
+    recording: {
+      enabled: asBool(rec.enabled, DEFAULT_CONFIG.recording.enabled),
     },
   }
 }

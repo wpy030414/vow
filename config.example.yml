@@ -18,3 +18,8 @@ port: 48085
 # 核心功能（手机录音上传 + 电脑端 ASR 转写）不受此项影响。
 virtualAudio:
   enabled: false
+
+# 录音落盘：把手机每次上传的音频按会话存为 WAV 文件（在 .vow/recordings/ 下），便于事后回听。
+# 默认关闭——开启后对录音主链路无感知（写盘失败只放弃该会话，不影响当前录音与 ASR）。
+recording:
+  enabled: false

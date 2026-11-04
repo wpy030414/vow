@@ -38,6 +38,9 @@ export class SSEHub {
    *  比在此猴补丁 createSession 更稳：复活路径同样接线（否则复活的会话收不到上行音频）。 */
   onSessionInit: ((session: SSESession) => void) | null = null
 
+  /** 会话销毁钩子——TTL 回收 / 显式销毁时调用（外部据此收尾该会话的录音等资源） */
+  onSessionDestroyed: ((sessionId: string) => void) | null = null
+
   // ─── 生命周期 ───
 
   start() {
@@ -104,6 +107,7 @@ export class SSEHub {
     }
     void this.closeWriter(session.writer, id)
     this.sessions.delete(id)
+    this.onSessionDestroyed?.(id)
     console.log(`[SSE Hub] session destroyed: ${id} (${this.sessions.size} active)`)
     this.notifyListeners(id, { type: 'error', payload: 'disconnected', timestamp: Date.now() })
   }

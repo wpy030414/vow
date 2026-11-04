@@ -66,6 +66,21 @@ describe('loadConfig', () => {
     expect(cfg.virtualAudio.enabled).toBe(false)
   })
 
+  it('recording.enabled 默认关闭 ① 缺节 ② 缺键 ③ 字符串容错', () => {
+    expect(normalizeConfig({}).recording.enabled).toBe(false)
+    expect(normalizeConfig({ recording: {} }).recording.enabled).toBe(false)
+    expect(normalizeConfig({ recording: { enabled: 'true' } }).recording.enabled).toBe(true)
+  })
+
+  it('录音完整 yaml 段读取与归一化', () => {
+    const root = makeRoot(`port: 48100
+recording:
+  enabled: true
+`)
+    const cfg = loadConfig({ repoRoot: root, env: {} })
+    expect(cfg.recording.enabled).toBe(true)
+  })
+
   it('PORT 环境变量优先级高于 config.yml', () => {
     const root = makeRoot('port: 48100\n')
     expect(loadConfig({ repoRoot: root, env: { PORT: '49000' } }).port).toBe(49000)
@@ -79,6 +94,7 @@ describe('loadConfig', () => {
   it('默认 shape：virtualAudio.enabled=false，且不存在 hostAudio 之类的无效开关', () => {
     const cfg = loadConfig({ repoRoot: makeRoot(), env: {} })
     expect(cfg.virtualAudio).toEqual({ enabled: false })
-    expect(Object.keys(cfg).sort()).toEqual(['port', 'virtualAudio'])
+    expect(cfg.recording).toEqual({ enabled: false })
+    expect(Object.keys(cfg).sort()).toEqual(['port', 'recording', 'virtualAudio'])
   })
 })

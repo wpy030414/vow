@@ -11,6 +11,7 @@ import { createKeyRoutes } from './routes/keys'
 import { sseHub } from './services/sse-hub'
 import { initVirtualAudio } from './services/virtual-audio'
 import { loadConfig } from './services/config'
+import { AudioArchive } from './services/audio-archive'
 import { createDictationEngine, type DictationEngine } from './services/asr-dictation'
 import { iflytekEngineFactory, resolveAsrConfig } from './services/iflytek-asr'
 import { typeText } from './services/typing'
@@ -46,6 +47,10 @@ const virtualAudio = initVirtualAudio({ inputEnabled: appConfig.virtualAudio.ena
 const vowDir = join(repoRoot, '.vow')
 const tokenStore = createTokenStore(vowDir)
 const pairingToken = tokenStore.token
+
+// 上行录音落盘（DECISIONS A23）：默认关闭——关闭时不建实例、不创建目录，录音热路径零开销
+const archive = appConfig.recording.enabled ? new AudioArchive(join(vowDir, 'recordings')) : null
+if (archive) console.log('[Archive] 录音落盘已开启 → .vow/recordings/')
 
 const app = new Hono()
 
@@ -121,7 +126,13 @@ sseHub.onSessionInit = (session) => {
   session.onAudioChunk = ({ data, sampleRate }) => {
     virtualAudio.writeInputPCM({ data, sampleRate })
     dictation.feed(data, sampleRate)
+    archive?.write(session.id, data, sampleRate)
   }
+}
+
+// 会话销毁（TTL 回收 / 页面关闭）即收尾该会话的录音文件
+sseHub.onSessionDestroyed = (sessionId) => {
+  void archive?.close(sessionId)
 }
 
 virtualAudio.setOutputCallback((pcm: Buffer) => {
@@ -139,7 +150,7 @@ sseHub.onDictationChange = (active, sessionId, reason) => {
 }
 
 console.log(
-  `Server starting on https://localhost:${PORT}（听写引擎：${DICTATION_ENGINE_ID}；虚拟麦克风：${appConfig.virtualAudio.enabled ? '开' : '关'}）`,
+  `Server starting on https://localhost:${PORT}（听写引擎：${DICTATION_ENGINE_ID}；虚拟麦克风：${appConfig.virtualAudio.enabled ? '开' : '关'}；录音落盘：${appConfig.recording.enabled ? '开' : '关'}）`,
 )
 const { key, cert } = ensureCert(vowDir)
 serve({
@@ -159,6 +170,8 @@ if (existsSync(clientDir)) {
 const shutdown = async () => {
   console.log('\nShutting down...')
   dictation.cancel()
+  // 录音收尾：回填 WAV 头后再退出（正常退出路径；强杀由下次启动修补）
+  if (archive) await Promise.race([archive.closeAll(), new Promise((r) => setTimeout(r, 1500))])
   // PortAudio worker 宽限（其内部另有 2s 上限），超时即强制退出
   await Promise.race([virtualAudio.stop(), new Promise((r) => setTimeout(r, 1500))])
   sseHub.stop()

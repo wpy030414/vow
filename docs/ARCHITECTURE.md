@@ -91,6 +91,7 @@
 | `services/typing.ts` | 转写文本注入——KEYEVENTF_UNICODE 逐码元打入焦点窗口（绕过输入法） |
 | `services/iflytek-asr.ts` | 讯飞私有 ASR 直连（签名/重采样/分帧/WS 会话）+ 引擎工厂实现，协议见 scripts/recon/FINDINGS.md |
 | `services/tls-cert.ts` | 自签证书生成（HTTPS 安全上下文） |
+| `services/audio-archive.ts` | 上行录音落盘（可选，config.yml `recording.enabled`）——按会话写 WAV 至 .vow/recordings/，收尾回填长度，启动修补被强杀的占位头 |
 
 ### apps/web/
 

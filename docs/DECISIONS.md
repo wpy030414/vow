@@ -196,3 +196,20 @@
 - 枚举用例放宽为「只校验真实端点」：WASAPI 会返回形如「无名称 / 0 声道 / 0 采样率」的幽灵设备（实测本机 id=16），这是 PortAudio 既有行为，不应让回归测试因此误报。
 
 **代价**：跨包路径 `apps/server/scripts/` 下的脚本需自行上溯三级定位仓库根（已在两处显式 `resolve(__dirname, '..', '..', '..')` 并注释）；原 `portaudio-check` 命令已取消，改为 `pnpm --filter @vow/portaudio test`；若需向具体端点写正弦做听感验证，用 `PMC_SMOKE_TONE_MS=2000 pnpm --filter @vow/portaudio test`。
+
+### A23：上行录音落盘——config.yml 开关，默认关闭
+
+**决策**：新增可选功能「录音落盘」，由 `config.yml` 的 `recording.enabled` 控制（默认 `false`）：
+
+- 开启后，手机每次上传的 PCM 块（`session.onAudioChunk`）在送往虚拟麦克风与 ASR 之余，额外追加写入 `<repoRoot>/.vow/recordings/<本地时间>_<会话id后8位>_<采样率>Hz.wav`。
+- 采样率取**首块原值**（当前手机端 44100Hz），不重采样、不混音，保持上传原始数据。
+- 按会话惰性建文件（首块到来时），**会话销毁**（TTL 回收 / 页面关闭触发的 `onSessionDestroyed`）与**进程正常退出**（SIGINT/SIGTERM）时回填 WAV 头的 RIFF size / data size 并关闭。
+- 写盘失败只告警一次并放弃**该会话**，不影响录音主链路与 ASR。
+- 关闭时 `index.ts` 不实例化 `AudioArchive`，不创建目录，录音热路径仅多一次 `undefined` 判空。
+
+**理由**：
+- 「服务端是否保留录音」在隐私上是**重大且不可默认**的选择：默认开启等于偷偷留痕，默认关闭 + 显式开关让用户自己担责。
+- 采用 WAV 直写而非编码：手机端上行本就是 PCM16 base64，写 WAV 是零转码、零依赖，任何播放器可直接打开；同时避免为 `opusscript` 之类编码器重新引入依赖。
+- 占位头（`0xFFFFFFFF`）+ 启动修补：进程被强杀 / 断电时文件头长度未知。启动时扫描录 `recording/` 并对占位头按文件实际大小回填，使残次录音依然可播放；代价是启动时多一次目录扫描（目录不存在直接跳过）。
+
+**代价**：录音**不自动清理**，长期开启会持续占用磁盘，需用户自行定期删除 `.vow/recordings/`；`AudioArchive` 未做按文件大小/时长的轮转，超长录音上限受 WAV 32 位长度字段约束（约 4GiB，PCM16 单声道 @44.1kHz 约 13 小时）。
